@@ -5,6 +5,9 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 
+st.set_page_config(layout="wide")
+
+
 # Load environment variables from .env file
 load_dotenv()
 
