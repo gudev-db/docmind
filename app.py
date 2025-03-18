@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 
 st.set_page_config(layout="wide")
 
-
 # Load environment variables from .env file
 load_dotenv()
 
@@ -37,7 +36,6 @@ def load_document(file):
     os.remove(temp_file_path)  # Clean up the temporary file
     return content
 
-
 def analyze_document(doc, prompt, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-1.5-flash")
@@ -61,8 +59,31 @@ def main():
     ])
     
     if prompt == "Prompt Customizado":
-        prompt = st.sidebar.text_area("Escreva o prompt customizado")
-    
+        st.sidebar.markdown("### Chatbot - Interaja abaixo")
+        
+        # Initialize session state for conversation history if not already set
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+
+        # Input field for the user's message
+        user_input = st.text_input("Você: ", "")
+
+        if user_input:
+            # Append user input to the conversation history
+            st.session_state.messages.append({"role": "user", "content": user_input})
+
+            # Get the response from the model
+            if api_key:
+                response = analyze_document(" ".join([msg["content"] for msg in st.session_state.messages]), user_input, api_key)
+                st.session_state.messages.append({"role": "assistant", "content": response})
+            
+            # Display the conversation
+            for message in st.session_state.messages:
+                if message["role"] == "user":
+                    st.write(f"**Você:** {message['content']}")
+                else:
+                    st.write(f"**Assistente:** {message['content']}")
+
     uploaded_file = st.file_uploader("Suba um documento", type=["pdf", "txt", "docx", "csv"])
     if uploaded_file is not None and api_key:
         st.success("Arquivo subido com sucesso!")
