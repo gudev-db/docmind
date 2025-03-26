@@ -14,14 +14,23 @@ def load_campaign_data(file):
     """
     df = pd.read_csv(file)
 
+    # Clean column names by stripping extra spaces
+    df.columns = df.columns.str.strip()
+
+    # Verificar as colunas do DataFrame
+    st.write("Colunas do DataFrame:", df.columns)
+
     # Clean columns to ensure numeric operations
-    # Remove symbols like 'R$', ',' and convert to numeric
-    df['Investido'] = pd.to_numeric(df['Investido'].replace({'R\$': '', ',': ''}, regex=True), errors='coerce')
-    df['Previsto'] = pd.to_numeric(df['Previsto'].replace({'R\$': '', ',': ''}, regex=True), errors='coerce')
-    df['Restante'] = pd.to_numeric(df['Restante'].replace({'R\$': '', ',': ''}, regex=True), errors='coerce')
-    
-    # Clean '% Pacing Investimento' to numeric values
-    df['% Pacing Investimento'] = pd.to_numeric(df['% Pacing Investimento'].replace({'%': '', ',': ''}, regex=True), errors='coerce')
+    try:
+        df['Investido'] = pd.to_numeric(df['Investido'].replace({'R\$': '', ',': ''}, regex=True), errors='coerce')
+        df['Previsto'] = pd.to_numeric(df['Previsto'].replace({'R\$': '', ',': ''}, regex=True), errors='coerce')
+        df['Restante'] = pd.to_numeric(df['Restante'].replace({'R\$': '', ',': ''}, regex=True), errors='coerce')
+        
+        # Clean '% Pacing Investimento' to numeric values
+        df['% Pacing Investimento'] = pd.to_numeric(df['% Pacing Investimento'].replace({'%': '', ',': ''}, regex=True), errors='coerce')
+    except KeyError as e:
+        st.error(f"Erro ao acessar a coluna: {e}")
+        return None
 
     return df
 
