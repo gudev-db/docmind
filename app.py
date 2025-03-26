@@ -1,82 +1,131 @@
 import streamlit as st
-import google.generativeai as genai
-from langchain.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
-import os
 import pandas as pd
+import os
 from dotenv import load_dotenv
 
 st.set_page_config(layout="wide")
 
-
 # Load environment variables from .env file
 load_dotenv()
 
-def load_document(file):
-    ext = file.name.split(".")[-1]
-    temp_file_path = f"temp_uploaded.{ext}"  # Save file temporarily
+def load_campaign_data(file):
+    """
+    Load campaign data from CSV and return it as a DataFrame.
+    """
+    df = pd.read_csv(file)
+    return df
 
-    with open(temp_file_path, "wb") as f:
-        f.write(file.getbuffer())  # Write the uploaded file content
+def analyze_campaign_data(df: pd.DataFrame, prompt: str):
+    """
+    Analyze the campaign data based on a custom prompt.
+    Args:
+        df (DataFrame): The loaded campaign data.
+        prompt (str): The analysis instruction or question to ask.
+    
+    Returns:
+        str: The analysis result or answer to the question.
+    """
+    prompt_lower = prompt.lower()
 
-    if ext == "pdf":
-        loader = PyPDFLoader(temp_file_path)
-    elif ext == "txt":
-        loader = TextLoader(temp_file_path)
-    elif ext == "docx":
-        loader = Docx2txtLoader(temp_file_path)
-    elif ext == "csv":
-        # Load CSV using pandas
-        df = pd.read_csv(temp_file_path)
-        os.remove(temp_file_path)  # Clean up the temporary file
-        return df.to_string()  # Return as a string (can be adjusted based on how you want to present the CSV data)
-    else:
-        st.error("Unsupported file type.")
-        return None
+    # Analyze pacing
+    if 'pacing' in prompt_lower:
+        pacing = df['% Pacing Investimento'].mean()
+        return f"A média do Pacing Investimento das campanhas é {pacing:.2f}%."
+    
+    # Calculate totals
+    if 'total investido' in prompt_lower:
+        total_investido = df['Investido'].sum()
+        return f"Total Investido: R$ {total_investido:,.2f}"
 
-    content = loader.load()
-    os.remove(temp_file_path)  # Clean up the temporary file
-    return content
+    if 'total previsto' in prompt_lower:
+        total_previsto = df['Previsto'].sum()
+        return f"Total Previsto: R$ {total_previsto:,.2f}"
 
+    if 'total restante' in prompt_lower:
+        total_restante = df['Restante'].sum()
+        return f"Total Restante: R$ {total_restante:,.2f}"
+
+    # Filter by 'Ativa' status
+    if 'campanhas ativas' in prompt_lower:
+        active_campaigns = df[df['Ativa'] == 'Sim']
+        return active_campaigns.to_string(index=False)
+
+    # Filter by 'Mídia' type
+    if 'mídia' in prompt_lower:
+        media_type = prompt_lower.split('mídia')[-1].strip()
+        filtered_media = df[df['Midia'].str.contains(media_type, case=False, na=False)]
+        return filtered_media.to_string(index=False)
+
+    # Filter by Investido range
+    if 'investido' in prompt_lower:
+        investido_range = prompt_lower.split('investido')[-1].strip()
+        # Example: filter by Investido > 1000
+        if ">" in investido_range:
+            value = float(investido_range.split(">")[1].strip().replace("R$", "").replace(",", "."))
+            filtered_investido = df[df['Investido'] > value]
+            return filtered_investido.to_string(index=False)
+
+    # Summarize campaigns
+    if 'resumo de campanhas' in prompt_lower:
+        summary = df[['Campanhas', 'Investido', 'Previsto', 'Restante', '% Pacing Investimento']].describe()
+        return summary.to_string()
+
+    return "Desculpe, não consegui entender o seu prompt."
 
 def analyze_document(doc, prompt, api_key):
+    """
+    Use the LLM to analyze the document and return a response.
+    Args:
+        doc: The content of the document (CSV data).
+        prompt: The user's analysis prompt.
+        api_key: The Gemini API key.
+    
+    Returns:
+        str: The analysis result.
+    """
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(f"{prompt}: {doc}")
     return response.text
 
 def main():
-    st.title("Análise de Documentos - IA")
+    st.title("Analisador de Performance de Campanhas - IA")
     
     st.sidebar.header("Configurações")
     
     # Get the API key from environment variable
     api_key = os.getenv("GEMINI_API_KEY")
     
-    prompt = st.sidebar.selectbox("Select Analysis Type", [
-        "Análise Compreensiva de documento",
-        "Extrair insights chave",
-        "Resumir e identificar perguntas em aberto",
-        "Corrija o texto de acordo com as normas gramaticais brasileiras de uma forma que mantenha o sentido do texto e aponte as alterações feitas - Retorne o documento corrigido por completo.",
+    prompt = st.sidebar.selectbox("Selecione o Tipo de Análise", [
+        "Análise de Pacing",
+        "Soma de valores",
+        "Filtrar campanhas",
+        "Resumo das campanhas",
         "Prompt Customizado"
     ])
     
     if prompt == "Prompt Customizado":
         prompt = st.sidebar.text_area("Escreva o prompt customizado")
     
-    uploaded_file = st.file_uploader("Suba um documento", type=["pdf", "txt", "docx", "csv"])
+    uploaded_file = st.file_uploader("Suba um arquivo CSV de campanha", type=["csv"])
+    
     if uploaded_file is not None and api_key:
-        st.success("Arquivo subido com sucesso!")
-        document_content = load_document(uploaded_file)
+        st.success("Arquivo CSV subido com sucesso!")
+        campaign_data = load_campaign_data(uploaded_file)
         
-        if document_content:
-            analysis_result = analyze_document(document_content, prompt, api_key)
-            st.subheader("Resultado:")
+        if campaign_data is not None:
+            # Show the first few rows of the data to the user
+            st.subheader("Dados da Campanha:")
+            st.dataframe(campaign_data.head())
+            
+            # Analyze the data based on the prompt
+            analysis_result = analyze_campaign_data(campaign_data, prompt)
+            st.subheader("Resultado da Análise:")
             st.write(analysis_result)
     elif not api_key:
         st.error("A chave do Gemini API não foi encontrada no arquivo .env.")
     
     st.sidebar.markdown("---")
    
-
 if __name__ == "__main__":
     main()
