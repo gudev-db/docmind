@@ -15,12 +15,13 @@ def load_campaign_data(file):
     df = pd.read_csv(file)
 
     # Clean columns to ensure numeric operations
-    df['Investido'] = df['Investido'].replace({'R\$': '', ',': ''}, regex=True).astype(float)
-    df['Previsto'] = df['Previsto'].replace({'R\$': '', ',': ''}, regex=True).astype(float)
-    df['Restante'] = df['Restante'].replace({'R\$': '', ',': ''}, regex=True).astype(float)
+    # Remove symbols like 'R$', ',' and convert to numeric
+    df['Investido'] = pd.to_numeric(df['Investido'].replace({'R\$': '', ',': ''}, regex=True), errors='coerce')
+    df['Previsto'] = pd.to_numeric(df['Previsto'].replace({'R\$': '', ',': ''}, regex=True), errors='coerce')
+    df['Restante'] = pd.to_numeric(df['Restante'].replace({'R\$': '', ',': ''}, regex=True), errors='coerce')
     
     # Clean '% Pacing Investimento' to numeric values
-    df['% Pacing Investimento'] = df['% Pacing Investimento'].replace({'%': '', ',': ''}, regex=True).astype(float)
+    df['% Pacing Investimento'] = pd.to_numeric(df['% Pacing Investimento'].replace({'%': '', ',': ''}, regex=True), errors='coerce')
 
     return df
 
