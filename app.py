@@ -13,6 +13,15 @@ def load_campaign_data(file):
     Load campaign data from CSV and return it as a DataFrame.
     """
     df = pd.read_csv(file)
+
+    # Clean columns to ensure numeric operations
+    df['Investido'] = df['Investido'].replace({'R\$': '', ',': ''}, regex=True).astype(float)
+    df['Previsto'] = df['Previsto'].replace({'R\$': '', ',': ''}, regex=True).astype(float)
+    df['Restante'] = df['Restante'].replace({'R\$': '', ',': ''}, regex=True).astype(float)
+    
+    # Clean '% Pacing Investimento' to numeric values
+    df['% Pacing Investimento'] = df['% Pacing Investimento'].replace({'%': '', ',': ''}, regex=True).astype(float)
+
     return df
 
 def analyze_campaign_data(df: pd.DataFrame, prompt: str):
