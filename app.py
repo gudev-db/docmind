@@ -1,82 +1,97 @@
 import streamlit as st
 import google.generativeai as genai
-from langchain.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
-import os
 import pandas as pd
+import os
 from dotenv import load_dotenv
 
-st.set_page_config(layout="wide")
-
-
-# Load environment variables from .env file
+# Configuração inicial
 load_dotenv()
+st.set_page_config(layout="wide", page_title="Analisador de Campanhas de Marketing")
 
-def load_document(file):
-    ext = file.name.split(".")[-1]
-    temp_file_path = f"temp_uploaded.{ext}"  # Save file temporarily
-
-    with open(temp_file_path, "wb") as f:
-        f.write(file.getbuffer())  # Write the uploaded file content
-
-    if ext == "pdf":
-        loader = PyPDFLoader(temp_file_path)
-    elif ext == "txt":
-        loader = TextLoader(temp_file_path)
-    elif ext == "docx":
-        loader = Docx2txtLoader(temp_file_path)
-    elif ext == "csv":
-        # Load CSV using pandas
-        df = pd.read_csv(temp_file_path)
-        os.remove(temp_file_path)  # Clean up the temporary file
-        return df.to_string()  # Return as a string (can be adjusted based on how you want to present the CSV data)
-    else:
-        st.error("Unsupported file type.")
+def load_data(uploaded_file):
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            return pd.read_csv(uploaded_file)
+        return pd.read_excel(uploaded_file)
+    except Exception as e:
+        st.error(f"Erro ao carregar os dados: {str(e)}")
         return None
 
-    content = loader.load()
-    os.remove(temp_file_path)  # Clean up the temporary file
-    return content
-
-
-def analyze_document(doc, prompt, api_key):
+def ask_gemini(question, df, api_key, chat_history=None):
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(f"{prompt}: {doc}")
-    return response.text
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    context = f"""
+    Você é um analista de marketing especializado. 
+    Dados COMPLETOS das campanhas (formato CSV):
+    
+    {df.to_csv(index=False)}
+    
+    Colunas disponíveis: {', '.join(df.columns)}
+    """
+    
+    try:
+        response = model.generate_content(
+            f"{context}\n\nHistórico:\n{chat_history or 'Nenhum'}\n\nPergunta: {question}"
+        )
+        return response.text
+    except Exception as e:
+        return f"Erro na análise: {str(e)}"
 
 def main():
-    st.title("Análise de Documentos - IA")
+    st.title("📊 Analisador de Campanhas com Gemini")
+    st.markdown("Pergunte sobre seus dados em linguagem natural")
     
-    st.sidebar.header("Configurações")
+    # Botão para limpar o chat
+    if st.sidebar.button("🧹 Limpar Chat"):
+        st.session_state.messages = [{
+            "role": "assistant",
+            "content": "Chat limpo. O que gostaria de saber agora?"
+        }]
+        st.rerun()
     
-    # Get the API key from environment variable
     api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        st.error("Configure sua API key no arquivo .env")
+        return
     
-    prompt = st.sidebar.selectbox("Select Analysis Type", [
-        "Análise Compreensiva de documento",
-        "Extrair insights chave",
-        "Resumir e identificar perguntas em aberto",
-        "Corrija o texto de acordo com as normas gramaticais brasileiras de uma forma que mantenha o sentido do texto e aponte as alterações feitas - Retorne o documento corrigido por completo.",
-        "Prompt Customizado"
-    ])
+    uploaded_file = st.file_uploader("Carregue seu arquivo", type=["csv", "xlsx"])
     
-    if prompt == "Prompt Customizado":
-        prompt = st.sidebar.text_area("Escreva o prompt customizado")
+    if not uploaded_file:
+        st.info("Carregue um arquivo para começar")
+        return
     
-    uploaded_file = st.file_uploader("Suba um documento", type=["pdf", "txt", "docx", "csv"])
-    if uploaded_file is not None and api_key:
-        st.success("Arquivo subido com sucesso!")
-        document_content = load_document(uploaded_file)
+    df = load_data(uploaded_file)
+    if df is None:
+        return
+    
+    # Mostra pré-visualização
+    with st.expander("📁 Visualização dos dados (amostra)"):
+        st.dataframe(df.head())
+        st.write(f"Total de linhas: {len(df)}")
+    
+    # Inicializa o chat
+    if "messages" not in st.session_state:
+        st.session_state.messages = [{
+            "role": "assistant",
+            "content": f"Olá! Analisei {len(df)} registros de campanhas. O que gostaria de saber?"
+        }]
+    
+    # Exibe histórico do chat
+    for msg in st.session_state.messages:
+        st.chat_message(msg["role"]).write(msg["content"])
+    
+    # Input do usuário
+    if prompt := st.chat_input("Sua pergunta..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.chat_message("user").write(prompt)
         
-        if document_content:
-            analysis_result = analyze_document(document_content, prompt, api_key)
-            st.subheader("Resultado:")
-            st.write(analysis_result)
-    elif not api_key:
-        st.error("A chave do Gemini API não foi encontrada no arquivo .env.")
-    
-    st.sidebar.markdown("---")
-   
+        with st.spinner(f"Analisando {len(df)} registros..."):
+            history = "\n".join(f"{m['role']}: {m['content']}" for m in st.session_state.messages[-3:])
+            response = ask_gemini(prompt, df, api_key, history)
+            
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            st.chat_message("assistant").write(response)
 
 if __name__ == "__main__":
     main()
