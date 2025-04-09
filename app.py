@@ -26,20 +26,20 @@ if 'chat_history' not in st.session_state:
 
 # Funções de limpeza específicas para relatórios do Google Ads
 def clean_google_ads_value(value):
-    if pd.isna(value):
-        return np.nan
+    if pd.isna(value) or value == '--':
+        return 0.0
     if isinstance(value, str):
         # Remove caracteres não numéricos exceto ponto e vírgula
         value = re.sub(r'[^\d,.-]', '', value)
         # Remove pontos como separadores de milhar
         value = value.replace('.', '').replace(',', '.').strip()
         if value == '-' or value == '':
-            return np.nan
+            return 0.0
         try:
             return float(value)
         except:
-            return np.nan
-    return float(value) if pd.notna(value) else np.nan
+            return 0.0
+    return float(value) if pd.notna(value) else 0.0
 
 def clean_google_ads_data(df):
     # Identifica colunas que provavelmente contêm valores monetários ou porcentagens
@@ -49,12 +49,17 @@ def clean_google_ads_data(df):
     for col in money_cols:
         df[col] = df[col].apply(clean_google_ads_value)
     
-    # Limpeza de colunas específicas
-    if 'Interactions' in df.columns:
-        df['Interactions'] = df['Interactions'].str.replace(',', '').astype(float)
+    # Limpeza específica para colunas numéricas com formato especial
+    numeric_cols = ['Clicks', 'Impr.', 'Interactions', 'Viewable impr.', 'Conversions']
     
-    if 'Impr.' in df.columns:
-        df['Impr.'] = df['Impr.'].str.replace(',', '').astype(float)
+    for col in numeric_cols:
+        if col in df.columns:
+            # Remove vírgulas de milhar e converte para float
+            df[col] = df[col].astype(str).str.replace(',', '').replace('--', '0').replace('-', '0').fillna(0).astype(float)
+    
+    # Garante que todas as colunas numéricas tenham valores válidos
+    numeric_columns = df.select_dtypes(include=[np.number]).columns
+    df[numeric_columns] = df[numeric_columns].fillna(0)
     
     return df
 
@@ -78,22 +83,31 @@ def load_google_ads_data(uploaded_file):
 def show_google_ads_summary(df):
     st.subheader("Resumo do Relatório Google Ads")
     
+    # Verifica se as colunas necessárias existem
+    has_cost = 'Cost' in df.columns
+    has_impressions = 'Impr.' in df.columns
+    has_clicks = 'Clicks' in df.columns
+    
     # Métricas principais
     st.write("### Métricas Principais")
     col1, col2, col3, col4 = st.columns(4)
     
+    total_cost = df['Cost'].sum() if has_cost else 0
+    total_impressions = df['Impr.'].sum() if has_impressions else 0
+    total_clicks = df['Clicks'].sum() if has_clicks else 0
+    
     with col1:
-        st.metric("Total Gasto", f"R$ {df['Cost'].sum():,.2f}")
+        st.metric("Total Gasto", f"R$ {total_cost:,.2f}")
     
     with col2:
-        st.metric("Total de Impressões", f"{df['Impr.'].sum():,.0f}")
+        st.metric("Total de Impressões", f"{total_impressions:,.0f}")
     
     with col3:
-        avg_cpc = df['Cost'].sum() / df['Clicks'].sum() if df['Clicks'].sum() > 0 else 0
+        avg_cpc = total_cost / total_clicks if total_clicks > 0 else 0
         st.metric("CPC Médio", f"R$ {avg_cpc:,.2f}")
     
     with col4:
-        ctr = (df['Clicks'].sum() / df['Impr.'].sum()) * 100 if df['Impr.'].sum() > 0 else 0
+        ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
         st.metric("CTR", f"{ctr:.2f}%")
     
     # Tabs para diferentes visualizações
@@ -101,34 +115,59 @@ def show_google_ads_summary(df):
     
     with tab1:
         st.write("**Top Campanhas por Gasto**")
-        top_campaigns = df.groupby('Campaign')[['Cost', 'Clicks', 'Impr.']].sum().sort_values('Cost', ascending=False).head(10)
-        st.dataframe(top_campaigns.style.format({'Cost': 'R$ {:.2f}', 'Impr.': '{:,.0f}'}))
+        if has_cost:
+            top_campaigns = df.groupby('Campaign')[['Cost', 'Clicks', 'Impr.']].sum().sort_values('Cost', ascending=False).head(10)
+            st.dataframe(top_campaigns.style.format({'Cost': 'R$ {:.2f}', 'Impr.': '{:,.0f}'}))
+        else:
+            st.warning("Dados de custo não disponíveis")
         
         st.write("**Distribuição de Gasto por Tipo de Campanha**")
-        fig = px.pie(df, values='Cost', names='Campaign type', title='Gasto por Tipo de Campanha')
-        st.plotly_chart(fig, use_container_width=True)
+        if 'Campaign type' in df.columns and has_cost:
+            fig = px.pie(df, values='Cost', names='Campaign type', title='Gasto por Tipo de Campanha')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Dados insuficientes para esta visualização")
     
     with tab2:
-        campaign = st.selectbox("Selecione uma Campanha", df['Campaign'].unique())
-        campaign_data = df[df['Campaign'] == campaign]
-        
-        st.write(f"**Performance da Campanha: {campaign}**")
-        st.dataframe(campaign_data[['Cost', 'Clicks', 'Impr.', 'Avg. CPC', 'Interaction rate']])
-        
-        st.write("**Métricas Chave**")
-        fig = px.bar(campaign_data, x='Campaign', y=['Cost', 'Clicks', 'Impr.'], barmode='group')
-        st.plotly_chart(fig, use_container_width=True)
+        if 'Campaign' in df.columns:
+            campaign = st.selectbox("Selecione uma Campanha", df['Campaign'].unique())
+            campaign_data = df[df['Campaign'] == campaign]
+            
+            st.write(f"**Performance da Campanha: {campaign}**")
+            cols_to_show = []
+            if has_cost: cols_to_show.append('Cost')
+            if has_clicks: cols_to_show.append('Clicks')
+            if has_impressions: cols_to_show.append('Impr.')
+            if 'Avg. CPC' in df.columns: cols_to_show.append('Avg. CPC')
+            if 'Interaction rate' in df.columns: cols_to_show.append('Interaction rate')
+            
+            if cols_to_show:
+                st.dataframe(campaign_data[cols_to_show])
+            else:
+                st.warning("Dados insuficientes para mostrar detalhes da campanha")
+            
+            st.write("**Métricas Chave**")
+            if has_cost and has_clicks and has_impressions:
+                fig = px.bar(campaign_data, x='Campaign', y=['Cost', 'Clicks', 'Impr.'], barmode='group')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Dados insuficientes para esta visualização")
+        else:
+            st.warning("Coluna 'Campaign' não encontrada nos dados")
     
     with tab3:
         if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'])
-            time_data = df.groupby('Date')[['Cost', 'Clicks', 'Impr.']].sum().reset_index()
-            
-            st.write("**Performance ao Longo do Tempo**")
-            fig = px.line(time_data, x='Date', y=['Cost', 'Clicks', 'Impr.'], 
-                         labels={'value': 'Valor', 'variable': 'Métrica'},
-                         title='Métricas ao Longo do Tempo')
-            st.plotly_chart(fig, use_container_width=True)
+            try:
+                df['Date'] = pd.to_datetime(df['Date'])
+                time_data = df.groupby('Date')[['Cost', 'Clicks', 'Impr.']].sum().reset_index()
+                
+                st.write("**Performance ao Longo do Tempo**")
+                fig = px.line(time_data, x='Date', y=['Cost', 'Clicks', 'Impr.'], 
+                             labels={'value': 'Valor', 'variable': 'Métrica'},
+                             title='Métricas ao Longo do Tempo')
+                st.plotly_chart(fig, use_container_width=True)
+            except:
+                st.warning("Não foi possível processar dados temporais")
         else:
             st.warning("Dados temporais não disponíveis neste relatório")
 
@@ -137,15 +176,21 @@ def show_google_ads_analysis(df):
     
     # Filtros
     st.sidebar.header("Filtros")
-    campaign_type = st.sidebar.multiselect("Tipo de Campanha", df['Campaign type'].unique())
-    status = st.sidebar.multiselect("Status", df['Campaign status'].unique())
+    filter_options = []
+    
+    if 'Campaign type' in df.columns:
+        campaign_type = st.sidebar.multiselect("Tipo de Campanha", df['Campaign type'].unique())
+        filter_options.append(('Campaign type', campaign_type))
+    
+    if 'Campaign status' in df.columns:
+        status = st.sidebar.multiselect("Status", df['Campaign status'].unique())
+        filter_options.append(('Campaign status', status))
     
     # Aplicar filtros
     filtered_df = df.copy()
-    if campaign_type:
-        filtered_df = filtered_df[filtered_df['Campaign type'].isin(campaign_type)]
-    if status:
-        filtered_df = filtered_df[filtered_df['Campaign status'].isin(status)]
+    for col, values in filter_options:
+        if values:
+            filtered_df = filtered_df[filtered_df[col].isin(values)]
     
     # Métricas de performance
     st.write("### Métricas de Performance")
@@ -153,50 +198,87 @@ def show_google_ads_analysis(df):
     
     with col1:
         st.write("**Eficiência de Custo**")
-        st.dataframe(filtered_df[['Campaign', 'Cost', 'Conversions', 'Conv. value / cost']]
-                    .sort_values('Conv. value / cost', ascending=False)
-                    .style.format({'Cost': 'R$ {:.2f}', 'Conv. value / cost': '{:.2f}'}))
+        cols_to_show = ['Campaign', 'Cost']
+        if 'Conversions' in filtered_df.columns: cols_to_show.append('Conversions')
+        if 'Conv. value / cost' in filtered_df.columns: cols_to_show.append('Conv. value / cost')
+        
+        if len(cols_to_show) > 1:
+            sort_col = 'Conv. value / cost' if 'Conv. value / cost' in cols_to_show else 'Cost'
+            st.dataframe(filtered_df[cols_to_show]
+                          .sort_values(sort_col, ascending=False)
+                          .style.format({'Cost': 'R$ {:.2f}', 'Conv. value / cost': '{:.2f}'}))
+        else:
+            st.warning("Dados insuficientes para análise de eficiência de custo")
     
     with col2:
         st.write("**Engajamento**")
-        st.dataframe(filtered_df[['Campaign', 'Impr.', 'Clicks', 'Interaction rate']]
-                    .sort_values('Interaction rate', ascending=False)
-                    .style.format({'Impr.': '{:,.0f}', 'Interaction rate': '{:.2%}'}))
+        cols_to_show = ['Campaign']
+        if 'Impr.' in filtered_df.columns: cols_to_show.append('Impr.')
+        if 'Clicks' in filtered_df.columns: cols_to_show.append('Clicks')
+        if 'Interaction rate' in filtered_df.columns: cols_to_show.append('Interaction rate')
+        
+        if len(cols_to_show) > 1:
+            sort_col = 'Interaction rate' if 'Interaction rate' in cols_to_show else 'Impr.'
+            st.dataframe(filtered_df[cols_to_show]
+                          .sort_values(sort_col, ascending=False)
+                          .style.format({'Impr.': '{:,.0f}', 'Interaction rate': '{:.2%}'}))
+        else:
+            st.warning("Dados insuficientes para análise de engajamento")
     
     # Visualizações
     st.write("### Visualizações")
-    chart_type = st.selectbox("Tipo de Gráfico", ["Barras", "Dispersão", "Linha"])
+    available_numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
     
-    if chart_type == "Barras":
-        x_axis = st.selectbox("Eixo X", df.columns)
-        y_axis = st.selectbox("Eixo Y", [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])])
-        fig = px.bar(filtered_df, x=x_axis, y=y_axis, color='Campaign type')
-        st.plotly_chart(fig, use_container_width=True)
-    
-    elif chart_type == "Dispersão":
-        x_axis = st.selectbox("Eixo X", [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])])
-        y_axis = st.selectbox("Eixo Y", [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])])
-        size = st.selectbox("Tamanho", ['None'] + [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])])
-        color = st.selectbox("Cor", ['None', 'Campaign type', 'Campaign status'] + df.columns.tolist())
+    if len(available_numeric_cols) > 0:
+        chart_type = st.selectbox("Tipo de Gráfico", ["Barras", "Dispersão", "Linha"])
         
-        if size == 'None':
-            size = None
-        if color == 'None':
-            color = None
+        if chart_type == "Barras":
+            x_axis = st.selectbox("Eixo X", df.columns)
+            y_axis = st.selectbox("Eixo Y", available_numeric_cols)
+            color_options = ['Nenhum'] + [col for col in df.columns if df[col].nunique() < 20]
+            color = st.selectbox("Cor", color_options)
             
-        fig = px.scatter(filtered_df, x=x_axis, y=y_axis, size=size, color=color,
-                        hover_name='Campaign', hover_data=['Cost', 'Clicks'])
-        st.plotly_chart(fig, use_container_width=True)
-    
-    elif chart_type == "Linha":
-        if 'Date' in df.columns:
-            metrics = st.multiselect("Métricas", [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])],
-                                   default=['Cost', 'Clicks'])
-            time_data = filtered_df.groupby('Date')[metrics].sum().reset_index()
-            fig = px.line(time_data, x='Date', y=metrics)
+            if color == 'Nenhum':
+                color = None
+                
+            fig = px.bar(filtered_df, x=x_axis, y=y_axis, color=color)
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("Dados temporais não disponíveis para gráfico de linha")
+        
+        elif chart_type == "Dispersão":
+            if len(available_numeric_cols) >= 2:
+                x_axis = st.selectbox("Eixo X", available_numeric_cols)
+                y_axis = st.selectbox("Eixo Y", available_numeric_cols)
+                size = st.selectbox("Tamanho", ['Nenhum'] + available_numeric_cols)
+                color_options = ['Nenhum', 'Campaign type', 'Campaign status'] + [col for col in df.columns if df[col].nunique() < 20]
+                color = st.selectbox("Cor", color_options)
+                
+                if size == 'Nenhum':
+                    size = None
+                if color == 'Nenhum':
+                    color = None
+                    
+                fig = px.scatter(filtered_df, x=x_axis, y=y_axis, size=size, color=color,
+                                hover_name='Campaign' if 'Campaign' in df.columns else None,
+                                hover_data=['Cost', 'Clicks'] if 'Cost' in df.columns and 'Clicks' in df.columns else None)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Número insuficiente de colunas numéricas para gráfico de dispersão")
+        
+        elif chart_type == "Linha":
+            if 'Date' in df.columns:
+                try:
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    metrics = st.multiselect("Métricas", available_numeric_cols,
+                                           default=['Cost', 'Clicks'] if 'Cost' in available_numeric_cols and 'Clicks' in available_numeric_cols else available_numeric_cols[:2])
+                    time_data = filtered_df.groupby('Date')[metrics].sum().reset_index()
+                    fig = px.line(time_data, x='Date', y=metrics)
+                    st.plotly_chart(fig, use_container_width=True)
+                except:
+                    st.warning("Não foi possível processar dados temporais")
+            else:
+                st.warning("Dados temporais não disponíveis para gráfico de linha")
+    else:
+        st.warning("Não há colunas numéricas suficientes para visualizações")
 
 # Funções do chatbot
 def generate_google_ads_response(prompt, df):
@@ -208,12 +290,24 @@ def generate_google_ads_response(prompt, df):
         {df.head().to_string()}
         
         Colunas disponíveis: {', '.join(df.columns)}
-        Métricas principais:
-        - Total gasto: R$ {df['Cost'].sum():,.2f}
-        - Total de impressões: {df['Impr.'].sum():,.0f}
-        - Total de cliques: {df['Clicks'].sum():,.0f}
-        - CTR médio: {(df['Clicks'].sum() / df['Impr.'].sum() * 100 if df['Impr.'].sum() > 0 else 0):.2f}%
+        """
         
+        # Adiciona métricas principais se disponíveis
+        metrics_info = []
+        if 'Cost' in df.columns:
+            metrics_info.append(f"- Total gasto: R$ {df['Cost'].sum():,.2f}")
+        if 'Impr.' in df.columns:
+            metrics_info.append(f"- Total de impressões: {df['Impr.'].sum():,.0f}")
+        if 'Clicks' in df.columns:
+            metrics_info.append(f"- Total de cliques: {df['Clicks'].sum():,.0f}")
+        if 'Impr.' in df.columns and 'Clicks' in df.columns and df['Impr.'].sum() > 0:
+            ctr = (df['Clicks'].sum() / df['Impr.'].sum()) * 100
+            metrics_info.append(f"- CTR médio: {ctr:.2f}%")
+        
+        if metrics_info:
+            context += "\nMétricas principais:\n" + "\n".join(metrics_info)
+        
+        context += f"""
         Pergunta: {prompt}
         
         Responda de forma técnica, focando em métricas de performance, eficiência de custo e sugestões de otimização.
