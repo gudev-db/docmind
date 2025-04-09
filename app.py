@@ -95,6 +95,12 @@ def show_google_ads_summary(df):
     total_cost = df['Cost'].sum() if has_cost else 0
     total_impressions = df['Impr.'].sum() if has_impressions else 0
     total_clicks = df['Clicks'].sum() if has_clicks else 0
+    total_clicks = total_clicks if isinstance(total_clicks, (int, float)) else 0
+    
+    total_cost = df['Cost'].sum() if has_cost else 0
+    
+    avg_cpc = total_cost / total_clicks if total_clicks > 0 else 0
+
     
     with col1:
         st.metric("Total Gasto", f"R$ {total_cost:,.2f}")
