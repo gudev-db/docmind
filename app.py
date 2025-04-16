@@ -435,7 +435,218 @@ def chat_interface():
         
         st.rerun()
 
-# Interface principal
+def show_benchmark_analysis(df):
+    st.subheader("📊 Benchmark de Performance vs Médias")
+    
+    if df is None or df.empty:
+        st.warning("Nenhum dado disponível para análise de benchmark")
+        return
+    
+    # Calcula médias gerais
+    metrics = {
+        'Cost': {'name': 'Gasto', 'format': 'currency'},
+        'Impr.': {'name': 'Impressões', 'format': 'int'},
+        'Impressions': {'name': 'Impressões', 'format': 'int'},
+        'Clicks': {'name': 'Cliques', 'format': 'int'},
+        'Conversions': {'name': 'Conversões', 'format': 'int'},
+        'Avg. CPC': {'name': 'CPC Médio', 'format': 'currency'},
+        'Avg. CPM': {'name': 'CPM Médio', 'format': 'currency'},
+        'CTR': {'name': 'CTR', 'format': 'percent'},
+        'Interaction rate': {'name': 'Taxa de Interação', 'format': 'percent'}
+    }
+    
+    # Filtra apenas as métricas disponíveis no dataframe
+    available_metrics = {k: v for k, v in metrics.items() if k in df.columns}
+    
+    if not available_metrics:
+        st.warning("Não há métricas numéricas disponíveis para análise")
+        return
+    
+    # Calcula médias globais
+    global_means = {}
+    for metric in available_metrics:
+        if pd.api.types.is_numeric_dtype(df[metric]):
+            global_means[metric] = df[metric].mean()
+    
+    # Mostra cards com as médias globais
+    st.write("### Médias Globais")
+    cols = st.columns(min(4, len(available_metrics)))
+    
+    for idx, (metric, config) in enumerate(available_metrics.items()):
+        if metric in global_means:
+            with cols[idx % len(cols)]:
+                value = global_means[metric]
+                if config['format'] == 'currency':
+                    display_value = f"R$ {value:,.2f}"
+                elif config['format'] == 'percent':
+                    display_value = f"{value:.2%}"
+                elif config['format'] == 'int':
+                    display_value = f"{int(value):,}"
+                else:
+                    display_value = str(value)
+                
+                st.metric(config['name'], display_value)
+    
+    # Análise de campanhas vs média
+    st.write("### Campanhas vs Média")
+    
+    # Seleciona métrica para análise comparativa
+    selected_metric = st.selectbox(
+        "Selecione a métrica para análise comparativa",
+        options=list(available_metrics.keys()),
+        format_func=lambda x: available_metrics[x]['name']
+    )
+    
+    if selected_metric:
+        mean_value = global_means[selected_metric]
+        df_comparison = df.copy()
+        
+        # Calcula desvio da média
+        df_comparison[f'{selected_metric}_vs_mean'] = (df_comparison[selected_metric] - mean_value) / mean_value
+        
+        # Classifica campanhas
+        df_comparison['Performance'] = np.where(
+            df_comparison[selected_metric] > mean_value * 1.2, 'Acima da Média',
+            np.where(df_comparison[selected_metric] < mean_value * 0.8, 'Abaixo da Média', 'Na Média')
+        )
+        
+        # Mostra distribuição
+        st.write(f"**Distribuição de Performance para {available_metrics[selected_metric]['name']}**")
+        performance_dist = df_comparison['Performance'].value_counts(normalize=True) * 100
+        st.write(performance_dist)
+        
+        # Gráfico de violino para mostrar distribuição
+        fig = px.violin(df_comparison, y=selected_metric, box=True, points="all",
+                        title=f"Distribuição de {available_metrics[selected_metric]['name']}")
+        fig.add_hline(y=mean_value, line_dash="dash", line_color="red",
+                      annotation_text=f"Média: {mean_value:.2f}")
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Tabela com campanhas destacadas
+        st.write(f"**Campanhas Destacadas - {available_metrics[selected_metric]['name']}**")
+        
+        # Filtra apenas campanhas significativas (com pelo menos algum gasto ou impressões)
+        significant_campaigns = df_comparison[
+            (df_comparison['Cost'] > 0) | 
+            (df_comparison.get('Impr.', 0) > 0) |
+            (df_comparison.get('Impressions', 0) > 0)
+        ]
+        
+        top_campaigns = significant_campaigns.nlargest(5, selected_metric)
+        bottom_campaigns = significant_campaigns.nsmallest(5, selected_metric)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("🔝 Top Campanhas")
+            st.dataframe(
+                top_campaigns[['Campaign', selected_metric]].assign(
+                    **{f"% vs Média": ((top_campaigns[selected_metric] - mean_value) / mean_value * 100).round(1)}
+                ).style.format({
+                    selected_metric: '{:,.2f}',
+                    '% vs Média': '{:.1f}%'
+                })
+            )
+        
+        with col2:
+            st.write("🔻 Campanhas com Baixa Performance")
+            st.dataframe(
+                bottom_campaigns[['Campaign', selected_metric]].assign(
+                    **{f"% vs Média": ((bottom_campaigns[selected_metric] - mean_value) / mean_value * 100).round(1)}
+                ).style.format({
+                    selected_metric: '{:,.2f}',
+                    '% vs Média': '{:.1f}%'
+                })
+            )
+    
+    # Análise de variabilidade temporal
+    if 'Date' in df.columns:
+        st.write("### 📈 Análise de Variabilidade Temporal")
+        
+        try:
+            df['Date'] = pd.to_datetime(df['Date'])
+            df['Week'] = df['Date'].dt.isocalendar().week
+            df['Month'] = df['Date'].dt.month
+            
+            # Seleciona nível de agregação
+            time_agg = st.radio(
+                "Nível de Agregação Temporal",
+                options=['Diário', 'Semanal', 'Mensal'],
+                horizontal=True
+            )
+            
+            if time_agg == 'Semanal':
+                time_col = 'Week'
+                group_cols = ['Week']
+            elif time_agg == 'Mensal':
+                time_col = 'Month'
+                group_cols = ['Month']
+            else:
+                time_col = 'Date'
+                group_cols = ['Date']
+            
+            # Seleciona métrica para análise temporal
+            temporal_metric = st.selectbox(
+                "Selecione a métrica para análise temporal",
+                options=list(available_metrics.keys()),
+                key='temporal_metric',
+                format_func=lambda x: available_metrics[x]['name']
+            )
+            
+            if temporal_metric:
+                # Calcula métricas agregadas
+                temporal_df = df.groupby(group_cols).agg({
+                    temporal_metric: ['mean', 'std', 'count']
+                }).reset_index()
+                
+                # Renomeia colunas
+                temporal_df.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in temporal_df.columns]
+                
+                # Calcula coeficiente de variação
+                temporal_df['CV'] = (temporal_df[f'{temporal_metric}_std'] / temporal_df[f'{temporal_metric}_mean']) * 100
+                
+                # Mostra métricas de variabilidade
+                st.write("**Variabilidade Temporal**")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    avg_cv = temporal_df['CV'].mean()
+                    st.metric("Coeficiente de Variação Médio", f"{avg_cv:.1f}%")
+                
+                with col2:
+                    max_cv = temporal_df['CV'].max()
+                    st.metric("Maior Variabilidade", f"{max_cv:.1f}%")
+                
+                with col3:
+                    min_cv = temporal_df['CV'].min()
+                    st.metric("Menor Variabilidade", f"{min_cv:.1f}%")
+                
+                # Gráfico de linha com variabilidade
+                fig = px.line(
+                    temporal_df, 
+                    x=time_col, 
+                    y=f'{temporal_metric}_mean',
+                    error_y=f'{temporal_metric}_std',
+                    title=f"Variação de {available_metrics[temporal_metric]['name']} ({time_agg})"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Mostra períodos com maior variabilidade
+                st.write("**Períodos com Maior Variabilidade**")
+                high_var_periods = temporal_df.nlargest(5, 'CV')
+                st.dataframe(
+                    high_var_periods[[time_col, f'{temporal_metric}_mean', f'{temporal_metric}_std', 'CV']]
+                    .sort_values(time_col)
+                    .style.format({
+                        f'{temporal_metric}_mean': '{:,.2f}',
+                        f'{temporal_metric}_std': '{:,.2f}',
+                        'CV': '{:.1f}%'
+                    })
+                )
+        except Exception as e:
+            st.warning(f"Não foi possível realizar análise temporal: {str(e)}")
+
+# Atualize a função main para incluir a nova aba
 def main():
     st.title("📊 Painel de Análise de Google Ads")
     
@@ -452,8 +663,8 @@ def main():
                     "content": f"✅ Relatório do Google Ads carregado com sucesso! {len(st.session_state.df_clean)} campanhas encontradas."
                 })
     
-    # Abas principais
-    tab1, tab2 = st.tabs(["📈 Análise de Campanhas", "💬 Chatbot Especializado"])
+    # Abas principais - ATUALIZADO com nova aba
+    tab1, tab2, tab3 = st.tabs(["📈 Análise de Campanhas", "📊 Benchmark & Variabilidade", "💬 Chatbot Especializado"])
     
     with tab1:
         if st.session_state.df_clean is not None:
@@ -463,7 +674,46 @@ def main():
             st.info("Por favor, carregue um relatório do Google Ads para começar a análise.")
     
     with tab2:
+        if st.session_state.df_clean is not None:
+            show_benchmark_analysis(st.session_state.df_clean)
+        else:
+            st.info("Por favor, carregue um relatório do Google Ads para análise de benchmark.")
+    
+    with tab3:
         chat_interface()
 
-if __name__ == "__main__":
-    main()
+# Atualize a função main para incluir a nova aba
+def main():
+    st.title("📊 Painel de Análise de Google Ads")
+    
+    # Upload de arquivo
+    uploaded_file = st.file_uploader("Carregue seu relatório do Google Ads (CSV ou Excel)", type=["csv", "xlsx", "xls"])
+    
+    # Processa o arquivo carregado
+    if uploaded_file and st.session_state.df_raw is None:
+        with st.spinner("Processando dados do Google Ads..."):
+            st.session_state.df_raw, st.session_state.df_clean = load_google_ads_data(uploaded_file)
+            if st.session_state.df_clean is not None:
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": f"✅ Relatório do Google Ads carregado com sucesso! {len(st.session_state.df_clean)} campanhas encontradas."
+                })
+    
+    # Abas principais - ATUALIZADO com nova aba
+    tab1, tab2, tab3 = st.tabs(["📈 Análise de Campanhas", "📊 Benchmark & Variabilidade", "💬 Chatbot Especializado"])
+    
+    with tab1:
+        if st.session_state.df_clean is not None:
+            show_google_ads_summary(st.session_state.df_clean)
+            show_google_ads_analysis(st.session_state.df_clean)
+        else:
+            st.info("Por favor, carregue um relatório do Google Ads para começar a análise.")
+    
+    with tab2:
+        if st.session_state.df_clean is not None:
+            show_benchmark_analysis(st.session_state.df_clean)
+        else:
+            st.info("Por favor, carregue um relatório do Google Ads para análise de benchmark.")
+    
+    with tab3:
+        chat_interface()
