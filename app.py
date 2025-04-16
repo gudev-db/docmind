@@ -25,37 +25,76 @@ if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
 # Funções de limpeza específicas para relatórios do Google Ads
-def clean_google_ads_value(value):
+def preprocess_google_ads_numbers(value):
+    """
+    Pré-processa valores numéricos do Google Ads onde:
+    - Ponto (.) é o separador decimal
+    - Vírgula (,) deve ser ignorada (não é separador de milhar)
+    """
     if pd.isna(value) or value == '--':
+        return '0'
+    
+    value = str(value).strip()
+    
+    # Remove todos os caracteres não numéricos exceto ponto, vírgula e sinal negativo
+    value = re.sub(r'[^\d\.,-]', '', value)
+    
+    # Remove vírgulas (não são separadores de milhar no Google Ads)
+    value = value.replace(',', '')
+    
+    # Mantém o ponto como separador decimal
+    # Se houver múltiplos pontos, mantém apenas o último como decimal
+    parts = value.split('.')
+    if len(parts) > 1:
+        integer_part = ''.join(parts[:-1])
+        decimal_part = parts[-1]
+        value = f"{integer_part}.{decimal_part}" if decimal_part else f"{integer_part}"
+    
+    # Garante que valores vazios sejam zero
+    if value == '' or value == '-':
+        return '0'
+    
+    return value
+
+def clean_google_ads_value(value):
+    """
+    Limpa e converte um valor do Google Ads para float.
+    """
+    preprocessed = preprocess_google_ads_numbers(value)
+    try:
+        return float(preprocessed)
+    except ValueError:
         return 0.0
-    if isinstance(value, str):
-        # Remove caracteres não numéricos exceto ponto e vírgula
-        value = re.sub(r'[^\d,.-]', '', value)
-        # Remove pontos como separadores de milhar
-        value = value.replace('.', '').replace(',', '.').strip()
-        if value == '-' or value == '':
-            return 0.0
-        try:
-            return float(value)
-        except:
-            return 0.0
-    return float(value) if pd.notna(value) else 0.0
 
 def clean_google_ads_data(df):
+    """
+    Limpa o dataframe do Google Ads, tratando especialmente os formatos numéricos.
+    """
     # Identifica colunas que provavelmente contêm valores monetários ou porcentagens
     money_cols = [col for col in df.columns 
-                 if any(word in col.lower() for word in ['cost', 'cpm', 'cpc', 'cpv', 'budget', 'value', 'rate'])]
+                 if any(word in col.lower() for word in ['cost', 'cpm', 'cpc', 'cpv', 'budget', 'value', 'rate', 'amount'])]
     
-    for col in money_cols:
-        df[col] = df[col].apply(clean_google_ads_value)
+    # Aplica o pré-processamento a todas as colunas potencialmente numéricas
+    for col in df.columns:
+        # Verifica se a coluna parece conter números com formatação especial
+        if df[col].dtype == 'object' and df[col].astype(str).str.contains(r'[\d\.\,]').any():
+            # Pré-processa todos os valores como texto primeiro
+            df[col] = df[col].astype(str).apply(preprocess_google_ads_numbers)
+            
+            # Tenta converter para numérico
+            try:
+                df[col] = pd.to_numeric(df[col], errors='ignore')
+            except:
+                pass
     
     # Limpeza específica para colunas numéricas com formato especial
-    numeric_cols = ['Clicks', 'Impr.', 'Interactions', 'Viewable impr.', 'Conversions']
+    numeric_cols = ['Clicks', 'Impr.', 'Interactions', 'Viewable impr.', 'Conversions', 'Impressions']
     
     for col in numeric_cols:
         if col in df.columns:
-            # Remove vírgulas de milhar e converte para float
-            df[col] = df[col].astype(str).str.replace(',', '').replace('--', '0').replace('-', '0').fillna(0).astype(float)
+            # Remove qualquer caractere não numérico e converte
+            df[col] = df[col].astype(str).apply(preprocess_google_ads_numbers)
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     
     # Garante que todas as colunas numéricas tenham valores válidos
     numeric_columns = df.select_dtypes(include=[np.number]).columns
@@ -79,42 +118,38 @@ def load_google_ads_data(uploaded_file):
         st.error(f"Erro ao carregar os dados do Google Ads: {str(e)}")
         return None, None
 
-# Funções de análise específicas para Google Ads
 def show_google_ads_summary(df):
     st.subheader("Resumo do Relatório Google Ads")
     
     # Verifica se as colunas necessárias existem
     has_cost = 'Cost' in df.columns
-    has_impressions = 'Impr.' in df.columns
+    has_impressions = 'Impr.' in df.columns or 'Impressions' in df.columns
     has_clicks = 'Clicks' in df.columns
     
     # Métricas principais
     st.write("### Métricas Principais")
     col1, col2, col3, col4 = st.columns(4)
     
+    # Usa 'Impressions' se 'Impr.' não estiver disponível
+    impressions_col = 'Impr.' if 'Impr.' in df.columns else 'Impressions' if 'Impressions' in df.columns else None
+    
     total_cost = df['Cost'].sum() if has_cost else 0
-    total_impressions = df['Impr.'].sum() if has_impressions else 0
+    total_impressions = df[impressions_col].sum() if has_impressions else 0
     total_clicks = df['Clicks'].sum() if has_clicks else 0
-    total_clicks = total_clicks if isinstance(total_clicks, (int, float)) else 0
-    
-    total_cost = df['Cost'].sum() if has_cost else 0
-    
-    avg_cpc = total_cost / total_clicks if total_clicks > 0 else 0
-
     
     with col1:
-        st.metric("Total Gasto", f"R$ {total_cost:,.2f}")
+        st.metric("Total Gasto", f"R$ {total_cost:,.2f}".replace('.', '|').replace(',', '.').replace('|', ','))
     
     with col2:
-        st.metric("Total de Impressões", f"{total_impressions:,.0f}")
+        st.metric("Total de Impressões", f"{total_impressions:,.0f}".replace(',', '.'))
     
     with col3:
         avg_cpc = total_cost / total_clicks if total_clicks > 0 else 0
-        st.metric("CPC Médio", f"R$ {avg_cpc:,.2f}")
+        st.metric("CPC Médio", f"R$ {avg_cpc:,.2f}".replace('.', '|').replace(',', '.').replace('|', ','))
     
     with col4:
         ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
-        st.metric("CTR", f"{ctr:.2f}%")
+        st.metric("CTR", f"{ctr:.2f}%".replace('.', ','))
     
     # Tabs para diferentes visualizações
     tab1, tab2, tab3 = st.tabs(["Visão Geral", "Por Campanha", "Performance Temporal"])
@@ -122,7 +157,7 @@ def show_google_ads_summary(df):
     with tab1:
         st.write("**Top Campanhas por Gasto**")
         if has_cost:
-            top_campaigns = df.groupby('Campaign')[['Cost', 'Clicks', 'Impr.']].sum().sort_values('Cost', ascending=False).head(10)
+            top_campaigns = df.groupby('Campaign')[['Cost', 'Clicks', impressions_col if impressions_col else 'Impr.']].sum().sort_values('Cost', ascending=False).head(10)
             st.dataframe(top_campaigns.style.format({'Cost': 'R$ {:.2f}', 'Impr.': '{:,.0f}'}))
         else:
             st.warning("Dados de custo não disponíveis")
@@ -143,7 +178,7 @@ def show_google_ads_summary(df):
             cols_to_show = []
             if has_cost: cols_to_show.append('Cost')
             if has_clicks: cols_to_show.append('Clicks')
-            if has_impressions: cols_to_show.append('Impr.')
+            if has_impressions: cols_to_show.append(impressions_col if impressions_col else 'Impr.')
             if 'Avg. CPC' in df.columns: cols_to_show.append('Avg. CPC')
             if 'Interaction rate' in df.columns: cols_to_show.append('Interaction rate')
             
@@ -154,7 +189,7 @@ def show_google_ads_summary(df):
             
             st.write("**Métricas Chave**")
             if has_cost and has_clicks and has_impressions:
-                fig = px.bar(campaign_data, x='Campaign', y=['Cost', 'Clicks', 'Impr.'], barmode='group')
+                fig = px.bar(campaign_data, x='Campaign', y=['Cost', 'Clicks', impressions_col if impressions_col else 'Impr.'], barmode='group')
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.warning("Dados insuficientes para esta visualização")
@@ -165,10 +200,10 @@ def show_google_ads_summary(df):
         if 'Date' in df.columns:
             try:
                 df['Date'] = pd.to_datetime(df['Date'])
-                time_data = df.groupby('Date')[['Cost', 'Clicks', 'Impr.']].sum().reset_index()
+                time_data = df.groupby('Date')[['Cost', 'Clicks', impressions_col if impressions_col else 'Impr.']].sum().reset_index()
                 
                 st.write("**Performance ao Longo do Tempo**")
-                fig = px.line(time_data, x='Date', y=['Cost', 'Clicks', 'Impr.'], 
+                fig = px.line(time_data, x='Date', y=['Cost', 'Clicks', impressions_col if impressions_col else 'Impr.'], 
                              labels={'value': 'Valor', 'variable': 'Métrica'},
                              title='Métricas ao Longo do Tempo')
                 st.plotly_chart(fig, use_container_width=True)
@@ -219,15 +254,17 @@ def show_google_ads_analysis(df):
     with col2:
         st.write("**Engajamento**")
         cols_to_show = ['Campaign']
-        if 'Impr.' in filtered_df.columns: cols_to_show.append('Impr.')
+        if 'Impr.' in filtered_df.columns or 'Impressions' in filtered_df.columns: 
+            col = 'Impr.' if 'Impr.' in filtered_df.columns else 'Impressions'
+            cols_to_show.append(col)
         if 'Clicks' in filtered_df.columns: cols_to_show.append('Clicks')
         if 'Interaction rate' in filtered_df.columns: cols_to_show.append('Interaction rate')
         
         if len(cols_to_show) > 1:
-            sort_col = 'Interaction rate' if 'Interaction rate' in cols_to_show else 'Impr.'
+            sort_col = 'Interaction rate' if 'Interaction rate' in cols_to_show else 'Impr.' if 'Impr.' in cols_to_show else 'Impressions'
             st.dataframe(filtered_df[cols_to_show]
                           .sort_values(sort_col, ascending=False)
-                          .style.format({'Impr.': '{:,.0f}', 'Interaction rate': '{:.2%}'}))
+                          .style.format({'Impr.': '{:,.0f}', 'Impressions': '{:,.0f}', 'Interaction rate': '{:.2%}'}))
         else:
             st.warning("Dados insuficientes para análise de engajamento")
     
@@ -286,7 +323,6 @@ def show_google_ads_analysis(df):
     else:
         st.warning("Não há colunas numéricas suficientes para visualizações")
 
-# Funções do chatbot
 def generate_google_ads_response(prompt, df):
     try:
         # Prepara o contexto para o Gemini
@@ -302,13 +338,17 @@ def generate_google_ads_response(prompt, df):
         metrics_info = []
         if 'Cost' in df.columns:
             metrics_info.append(f"- Total gasto: R$ {df['Cost'].sum():,.2f}")
-        if 'Impr.' in df.columns:
-            metrics_info.append(f"- Total de impressões: {df['Impr.'].sum():,.0f}")
+        if 'Impr.' in df.columns or 'Impressions' in df.columns:
+            col = 'Impr.' if 'Impr.' in df.columns else 'Impressions'
+            metrics_info.append(f"- Total de impressões: {df[col].sum():,.0f}")
         if 'Clicks' in df.columns:
             metrics_info.append(f"- Total de cliques: {df['Clicks'].sum():,.0f}")
-        if 'Impr.' in df.columns and 'Clicks' in df.columns and df['Impr.'].sum() > 0:
-            ctr = (df['Clicks'].sum() / df['Impr.'].sum()) * 100
-            metrics_info.append(f"- CTR médio: {ctr:.2f}%")
+        if ('Impr.' in df.columns or 'Impressions' in df.columns) and 'Clicks' in df.columns:
+            impressions_col = 'Impr.' if 'Impr.' in df.columns else 'Impressions'
+            total_impressions = df[impressions_col].sum()
+            if total_impressions > 0:
+                ctr = (df['Clicks'].sum() / total_impressions) * 100
+                metrics_info.append(f"- CTR médio: {ctr:.2f}%")
         
         if metrics_info:
             context += "\nMétricas principais:\n" + "\n".join(metrics_info)
