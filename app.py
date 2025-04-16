@@ -215,6 +215,11 @@ def show_google_ads_summary(df):
 def show_google_ads_analysis(df):
     st.subheader("Análise Detalhada")
     
+    # First check if dataframe is valid
+    if df.empty:
+        st.warning("Nenhum dado disponível para análise")
+        return
+
     # Filtros
     st.sidebar.header("Filtros")
     filter_options = []
@@ -232,6 +237,22 @@ def show_google_ads_analysis(df):
     for col, values in filter_options:
         if values:
             filtered_df = filtered_df[filtered_df[col].isin(values)]
+
+    # Helper function for safe formatting
+    def safe_format(value, fmt):
+        try:
+            if pd.isna(value):
+                return ""
+            if fmt == "currency":
+                return f"R$ {float(value):,.2f}"
+            elif fmt == "percent":
+                return f"{float(value):.2%}"
+            elif fmt == "int":
+                return f"{int(value):,}"
+            else:
+                return str(value)
+        except:
+            return str(value)
     
     # Métricas de performance
     st.write("### Métricas de Performance")
@@ -245,9 +266,16 @@ def show_google_ads_analysis(df):
         
         if len(cols_to_show) > 1:
             sort_col = 'Conv. value / cost' if 'Conv. value / cost' in cols_to_show else 'Cost'
-            st.dataframe(filtered_df[cols_to_show]
-                          .sort_values(sort_col, ascending=False)
-                          .style.format({'Cost': 'R$ {:.2f}', 'Conv. value / cost': '{:.2f}'}))
+            display_df = filtered_df[cols_to_show].sort_values(sort_col, ascending=False)
+            
+            # Apply formatting without using styler
+            formatted_df = display_df.copy()
+            if 'Cost' in formatted_df.columns:
+                formatted_df['Cost'] = formatted_df['Cost'].apply(lambda x: safe_format(x, "currency"))
+            if 'Conv. value / cost' in formatted_df.columns:
+                formatted_df['Conv. value / cost'] = formatted_df['Conv. value / cost'].apply(lambda x: safe_format(x, "float"))
+            
+            st.dataframe(formatted_df)
         else:
             st.warning("Dados insuficientes para análise de eficiência de custo")
     
@@ -262,9 +290,20 @@ def show_google_ads_analysis(df):
         
         if len(cols_to_show) > 1:
             sort_col = 'Interaction rate' if 'Interaction rate' in cols_to_show else 'Impr.' if 'Impr.' in cols_to_show else 'Impressions'
-            st.dataframe(filtered_df[cols_to_show]
-                          .sort_values(sort_col, ascending=False)
-                          .style.format({'Impr.': '{:,.0f}', 'Impressions': '{:,.0f}', 'Interaction rate': '{:.2%}'}))
+            display_df = filtered_df[cols_to_show].sort_values(sort_col, ascending=False)
+            
+            # Apply formatting without using styler
+            formatted_df = display_df.copy()
+            if 'Impr.' in formatted_df.columns:
+                formatted_df['Impr.'] = formatted_df['Impr.'].apply(lambda x: safe_format(x, "int"))
+            if 'Impressions' in formatted_df.columns:
+                formatted_df['Impressions'] = formatted_df['Impressions'].apply(lambda x: safe_format(x, "int"))
+            if 'Interaction rate' in formatted_df.columns:
+                formatted_df['Interaction rate'] = formatted_df['Interaction rate'].apply(
+                    lambda x: safe_format(x, "percent") if isinstance(x, (int, float)) else str(x)
+                )
+            
+            st.dataframe(formatted_df)
         else:
             st.warning("Dados insuficientes para análise de engajamento")
     
