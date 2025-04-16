@@ -57,72 +57,58 @@ def preprocess_google_ads_numbers(value):
     return value
 
 def clean_google_ads_value(value):
-    """
-    Limpa e converte um valor do Google Ads para float.
-    """
-    preprocessed = preprocess_google_ads_numbers(value)
-    try:
-        return float(preprocessed)
-    except ValueError:
-        return 0.0
+    # Se o valor já for numérico, retorna como float
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    # Se for string, faz a limpeza apenas se for um valor monetário
+    if isinstance(value, str):
+        cleaned_value = re.sub(r'[^\d,.-]', '', value)  # Remove caracteres não numéricos
+        cleaned_value = cleaned_value.replace('.', '').replace(',', '.').strip()
+        if cleaned_value in ('', '-'):
+            return 0.0
+        try:
+            return float(cleaned_value)
+        except:
+            return 0.0
+    return 0.0  # Padrão para valores inválidos
 
 def clean_google_ads_data(df):
-    """
-    Limpa o dataframe do Google Ads, tratando especialmente os formatos numéricos.
-    """
-    # Identifica colunas que provavelmente contêm valores monetários ou porcentagens
+    # --- NÃO MODIFICAR A COLUNA 'CAMPAIGN' ---
+    if 'Campaign' in df.columns:
+        df['Campaign'] = df['Campaign'].astype(str)  # Garante que seja texto, mas sem alterar valores
+
+    # --- LIMPEZA APENAS PARA COLUNAS NUMÉRICAS ---
     money_cols = [col for col in df.columns 
-                 if any(word in col.lower() for word in ['cost', 'cpm', 'cpc', 'cpv', 'budget', 'value', 'rate', 'amount'])]
-    
-    # Aplica o pré-processamento a todas as colunas potencialmente numéricas
-    for col in df.columns:
-        # Verifica se a coluna parece conter números com formatação especial
-        if df[col].dtype == 'object' and df[col].astype(str).str.contains(r'[\d\.\,]').any():
-            # Pré-processa todos os valores como texto primeiro
-            df[col] = df[col].astype(str).apply(preprocess_google_ads_numbers)
-            
-            # Tenta converter para numérico
-            try:
-                df[col] = pd.to_numeric(df[col], errors='ignore')
-            except:
-                pass
-    
-    # Limpeza específica para colunas numéricas com formato especial
-    numeric_cols = ['Clicks', 'Impr.', 'Interactions', 'Viewable impr.', 'Conversions', 'Impressions']
-    
+                 if any(word in col.lower() for word in ['cost', 'cpm', 'cpc', 'cpv', 'budget', 'value', 'rate'])
+                 and col != 'Campaign']  # Exclui 'Campaign' explicitamente
+
+    for col in money_cols:
+        df[col] = df[col].apply(clean_google_ads_value)  # Aplica limpeza apenas a colunas monetárias
+
+    # Limpeza para outras colunas numéricas (exceto 'Campaign')
+    numeric_cols = ['Clicks', 'Impr.', 'Interactions', 'Viewable impr.', 'Conversions']
     for col in numeric_cols:
-        if col in df.columns:
-            # Remove qualquer caractere não numérico e converte
-            df[col] = df[col].astype(str).apply(preprocess_google_ads_numbers)
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    
-    # Garante que todas as colunas numéricas tenham valores válidos
-    numeric_columns = df.select_dtypes(include=[np.number]).columns
-    df[numeric_columns] = df[numeric_columns].fillna(0)
+        if col in df.columns and col != 'Campaign':
+            df[col] = df[col].astype(str).str.replace(',', '').replace('--', '0').replace('-', '0').fillna(0).astype(float)
     
     return df
 
-def load_google_ads_data(uploaded_file, file_name=None):
+def load_google_ads_data(uploaded_file):
     try:
-        # Lê o arquivo ignorando as duas primeiras linhas
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, skiprows=2, encoding='utf-8', dtype={'Campaign': str})  # Forçar Campaign como string
+            # Forçar 'Campaign' como string e evitar inferência automática de tipos
+            df = pd.read_csv(uploaded_file, skiprows=2, encoding='utf-8', dtype={'Campaign': str})
         elif uploaded_file.name.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(uploaded_file, skiprows=2, dtype={'Campaign': str})  # Forçar Campaign como string
+            # Ler todas as colunas como objeto (string) inicialmente
+            df = pd.read_excel(uploaded_file, skiprows=2, dtype={'Campaign': str})
         else:
-            st.error("Formato de arquivo não suportado. Por favor, carregue um CSV ou Excel.")
-            return None, None
-        
-        # Verifica e converte a coluna Campaign para string, se existir
-        if 'Campaign' in df.columns:
-            df['Campaign'] = df['Campaign'].astype(str)
-        else:
-            st.error("O arquivo não contém a coluna 'Campaign' necessária para análise.")
+            st.error("Formato de arquivo não suportado. Use CSV ou Excel.")
             return None, None
         
         return df.copy(), clean_google_ads_data(df)
     except Exception as e:
-        st.error(f"Erro ao carregar os dados do Google Ads: {str(e)}")
+        st.error(f"Erro ao carregar os dados: {str(e)}")
         return None, None
 
 def show_google_ads_summary(df):
@@ -931,6 +917,12 @@ def main():
 # Atualize a função main para incluir a nova aba
 def main():
     st.title("📊 Painel de Análise de Google Ads")
+    if st.session_state.df_clean is not None:
+        st.write("### Debug: Dados Crus (5 primeiras linhas)")
+        st.write(st.session_state.df_raw[['Campaign']].head())
+        
+        st.write("### Debug: Dados Limpos (5 primeiras linhas)")
+        st.write(st.session_state.df_clean[['Campaign']].head())
     
     # Upload de arquivo
     uploaded_file = st.file_uploader("Carregue seu relatório do Google Ads (CSV ou Excel)", type=["csv", "xlsx", "xls"])
