@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
-from io import StringIO
 import re
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -23,14 +22,12 @@ if 'df_clean' not in st.session_state:
     st.session_state.df_clean = None
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
+if 'comparison_data' not in st.session_state:
+    st.session_state.comparison_data = {}
 
 # Funções de limpeza específicas para relatórios do Google Ads
 def preprocess_google_ads_numbers(value):
-    """
-    Pré-processa valores numéricos do Google Ads onde:
-    - Ponto (.) é o separador decimal
-    - Vírgula (,) deve ser ignorada (não é separador de milhar)
-    """
+    """Pré-processa valores numéricos do Google Ads."""
     if pd.isna(value) or value == '--':
         return '0'
     
@@ -43,7 +40,6 @@ def preprocess_google_ads_numbers(value):
     value = value.replace(',', '')
     
     # Mantém o ponto como separador decimal
-    # Se houver múltiplos pontos, mantém apenas o último como decimal
     parts = value.split('.')
     if len(parts) > 1:
         integer_part = ''.join(parts[:-1])
@@ -57,37 +53,35 @@ def preprocess_google_ads_numbers(value):
     return value
 
 def clean_google_ads_value(value):
-    # Se o valor já for numérico, retorna como float
+    """Limpa valores monetários do Google Ads."""
     if isinstance(value, (int, float)):
         return float(value)
     
-    # Se for string, faz a limpeza apenas se for um valor monetário
     if isinstance(value, str):
-        cleaned_value = re.sub(r'[^\d,.-]', '', value)  # Remove caracteres não numéricos
-        cleaned_value = cleaned_value.replace('.', '').replace(',', '.').strip()
-        if cleaned_value in ('', '-'):
-            return 0.0
+        cleaned_value = preprocess_google_ads_numbers(value)
         try:
             return float(cleaned_value)
         except:
             return 0.0
-    return 0.0  # Padrão para valores inválidos
+    return 0.0
 
 def clean_google_ads_data(df):
-    # --- NÃO MODIFICAR A COLUNA 'CAMPAIGN' ---
+    """Limpa os dados do Google Ads preservando a coluna Campaign."""
+    # Garante que a coluna Campaign seja tratada como string
     if 'Campaign' in df.columns:
-        df['Campaign'] = df['Campaign'].astype(str)  # Garante que seja texto, mas sem alterar valores
-
-    # --- LIMPEZA APENAS PARA COLUNAS NUMÉRICAS ---
+        df['Campaign'] = df['Campaign'].astype(str)
+    
+    # Identifica colunas monetárias (excluindo Campaign)
     money_cols = [col for col in df.columns 
                  if any(word in col.lower() for word in ['cost', 'cpm', 'cpc', 'cpv', 'budget', 'value', 'rate'])
-                 and col != 'Campaign']  # Exclui 'Campaign' explicitamente
-
+                 and col != 'Campaign']
+    
+    # Aplica limpeza apenas a colunas monetárias
     for col in money_cols:
-        df[col] = df[col].apply(clean_google_ads_value)  # Aplica limpeza apenas a colunas monetárias
-
-    # Limpeza para outras colunas numéricas (exceto 'Campaign')
-    numeric_cols = ['Clicks', 'Impr.', 'Interactions', 'Viewable impr.', 'Conversions']
+        df[col] = df[col].apply(clean_google_ads_value)
+    
+    # Limpeza para outras colunas numéricas (exceto Campaign)
+    numeric_cols = ['Clicks', 'Impr.', 'Impressions', 'Interactions', 'Viewable impr.', 'Conversions']
     for col in numeric_cols:
         if col in df.columns and col != 'Campaign':
             df[col] = df[col].astype(str).str.replace(',', '').replace('--', '0').replace('-', '0').fillna(0).astype(float)
@@ -95,12 +89,11 @@ def clean_google_ads_data(df):
     return df
 
 def load_google_ads_data(uploaded_file):
+    """Carrega dados do Google Ads garantindo que Campaign seja string."""
     try:
         if uploaded_file.name.endswith('.csv'):
-            # Forçar 'Campaign' como string e evitar inferência automática de tipos
             df = pd.read_csv(uploaded_file, skiprows=2, encoding='utf-8', dtype={'Campaign': str})
         elif uploaded_file.name.endswith(('.xlsx', '.xls')):
-            # Ler todas as colunas como objeto (string) inicialmente
             df = pd.read_excel(uploaded_file, skiprows=2, dtype={'Campaign': str})
         else:
             st.error("Formato de arquivo não suportado. Use CSV ou Excel.")
@@ -112,9 +105,10 @@ def load_google_ads_data(uploaded_file):
         return None, None
 
 def show_google_ads_summary(df):
+    """Exibe um resumo das campanhas do Google Ads."""
     st.subheader("Resumo do Relatório Google Ads")
     
-    # Verifica se as colunas necessárias existem
+    # Verifica colunas disponíveis
     has_cost = 'Cost' in df.columns
     has_impressions = 'Impr.' in df.columns or 'Impressions' in df.columns
     has_clicks = 'Clicks' in df.columns
@@ -131,18 +125,18 @@ def show_google_ads_summary(df):
     total_clicks = df['Clicks'].sum() if has_clicks else 0
     
     with col1:
-        st.metric("Total Gasto", f"R$ {total_cost:,.2f}".replace('.', '|').replace(',', '.').replace('|', ','))
+        st.metric("Total Gasto", f"R$ {total_cost:,.2f}")
     
     with col2:
-        st.metric("Total de Impressões", f"{total_impressions:,.0f}".replace(',', '.'))
+        st.metric("Total de Impressões", f"{total_impressions:,.0f}")
     
     with col3:
         avg_cpc = total_cost / total_clicks if total_clicks > 0 else 0
-        st.metric("CPC Médio", f"R$ {avg_cpc:,.2f}".replace('.', '|').replace(',', '.').replace('|', ','))
+        st.metric("CPC Médio", f"R$ {avg_cpc:,.2f}")
     
     with col4:
         ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
-        st.metric("CTR", f"{ctr:.2f}%".replace('.', ','))
+        st.metric("CTR", f"{ctr:.2f}%")
     
     # Tabs para diferentes visualizações
     tab1, tab2, tab3 = st.tabs(["Visão Geral", "Por Campanha", "Performance Temporal"])
@@ -206,9 +200,9 @@ def show_google_ads_summary(df):
             st.warning("Dados temporais não disponíveis neste relatório")
 
 def show_google_ads_analysis(df):
+    """Exibe análise detalhada das campanhas."""
     st.subheader("Análise Detalhada")
     
-    # First check if dataframe is valid
     if df.empty:
         st.warning("Nenhum dado disponível para análise")
         return
@@ -231,22 +225,6 @@ def show_google_ads_analysis(df):
         if values:
             filtered_df = filtered_df[filtered_df[col].isin(values)]
 
-    # Helper function for safe formatting
-    def safe_format(value, fmt):
-        try:
-            if pd.isna(value):
-                return ""
-            if fmt == "currency":
-                return f"R$ {float(value):,.2f}"
-            elif fmt == "percent":
-                return f"{float(value):.2%}"
-            elif fmt == "int":
-                return f"{int(value):,}"
-            else:
-                return str(value)
-        except:
-            return str(value)
-    
     # Métricas de performance
     st.write("### Métricas de Performance")
     col1, col2 = st.columns(2)
@@ -260,15 +238,10 @@ def show_google_ads_analysis(df):
         if len(cols_to_show) > 1:
             sort_col = 'Conv. value / cost' if 'Conv. value / cost' in cols_to_show else 'Cost'
             display_df = filtered_df[cols_to_show].sort_values(sort_col, ascending=False)
-            
-            # Apply formatting without using styler
-            formatted_df = display_df.copy()
-            if 'Cost' in formatted_df.columns:
-                formatted_df['Cost'] = formatted_df['Cost'].apply(lambda x: safe_format(x, "currency"))
-            if 'Conv. value / cost' in formatted_df.columns:
-                formatted_df['Conv. value / cost'] = formatted_df['Conv. value / cost'].apply(lambda x: safe_format(x, "float"))
-            
-            st.dataframe(formatted_df)
+            st.dataframe(display_df.style.format({
+                'Cost': 'R$ {:.2f}',
+                'Conv. value / cost': '{:.2f}'
+            }))
         else:
             st.warning("Dados insuficientes para análise de eficiência de custo")
     
@@ -284,19 +257,11 @@ def show_google_ads_analysis(df):
         if len(cols_to_show) > 1:
             sort_col = 'Interaction rate' if 'Interaction rate' in cols_to_show else 'Impr.' if 'Impr.' in cols_to_show else 'Impressions'
             display_df = filtered_df[cols_to_show].sort_values(sort_col, ascending=False)
-            
-            # Apply formatting without using styler
-            formatted_df = display_df.copy()
-            if 'Impr.' in formatted_df.columns:
-                formatted_df['Impr.'] = formatted_df['Impr.'].apply(lambda x: safe_format(x, "int"))
-            if 'Impressions' in formatted_df.columns:
-                formatted_df['Impressions'] = formatted_df['Impressions'].apply(lambda x: safe_format(x, "int"))
-            if 'Interaction rate' in formatted_df.columns:
-                formatted_df['Interaction rate'] = formatted_df['Interaction rate'].apply(
-                    lambda x: safe_format(x, "percent") if isinstance(x, (int, float)) else str(x)
-                )
-            
-            st.dataframe(formatted_df)
+            st.dataframe(display_df.style.format({
+                'Impr.': '{:,.0f}',
+                'Impressions': '{:,.0f}',
+                'Interaction rate': '{:.2%}'
+            }))
         else:
             st.warning("Dados insuficientes para análise de engajamento")
     
@@ -356,17 +321,17 @@ def show_google_ads_analysis(df):
         st.warning("Não há colunas numéricas suficientes para visualizações")
 
 def generate_google_ads_response(prompt, df):
+    """Gera resposta do chatbot especializado em Google Ads."""
     try:
-        # Prepara o contexto para o Gemini
         context = f"""
         Você é um especialista em Google Ads analisando um relatório de campanhas. 
         Aqui está uma amostra dos dados:
-        {df.to_string()}
+        {df.head().to_string()}
         
         Colunas disponíveis: {', '.join(df.columns)}
         """
         
-        # Adiciona métricas principais se disponíveis
+        # Adiciona métricas principais
         metrics_info = []
         if 'Cost' in df.columns:
             metrics_info.append(f"- Total gasto: R$ {df['Cost'].sum():,.2f}")
@@ -389,8 +354,9 @@ def generate_google_ads_response(prompt, df):
         Pergunta: {prompt}
         
         Responda de forma técnica, focando em métricas de performance, eficiência de custo e sugestões de otimização.
-        Inclua números específicos quando relevante. Tire insights sobre as métricas. Retorne os nomes das campanhas que estão abaixo ou acima das médias das colunas numéricas.
-        Me traga insights técnicos sobre a performance das campanhas. Gere um relatório sobre as campanhas.
+        Inclua números específicos quando relevante. Tire insights sobre as métricas. 
+        Retorne os nomes das campanhas que estão abaixo ou acima das médias das colunas numéricas.
+        Gere um relatório técnico sobre a performance das campanhas.
         """
         
         response = model.generate_content(context)
@@ -399,6 +365,7 @@ def generate_google_ads_response(prompt, df):
         return f"Erro ao gerar resposta: {str(e)}"
 
 def chat_interface():
+    """Interface do chatbot de análise."""
     st.subheader("💬 Chatbot de Análise de Google Ads")
     
     # Exibir histórico do chat
@@ -430,6 +397,7 @@ def chat_interface():
         st.rerun()
 
 def show_benchmark_analysis(df):
+    """Exibe análise de benchmark e variabilidade."""
     st.subheader("📊 Benchmark de Performance vs Médias")
     
     if df is None or df.empty:
@@ -449,7 +417,7 @@ def show_benchmark_analysis(df):
         'Interaction rate': {'name': 'Taxa de Interação', 'format': 'percent'}
     }
     
-    # Filtra apenas as métricas disponíveis no dataframe
+    # Filtra métricas disponíveis
     available_metrics = {k: v for k, v in metrics.items() if k in df.columns}
     
     if not available_metrics:
@@ -502,7 +470,6 @@ def show_benchmark_analysis(df):
         df_comparison['Performance'] = np.where(
             df_comparison[selected_metric] > mean_value * 1.2, 'Acima da Média',
             np.where(df_comparison[selected_metric] < mean_value * 0.8, 'Abaixo da Média', 'Na Média')
-        )
         
         # Mostra distribuição
         st.write(f"**Distribuição de Performance para {available_metrics[selected_metric]['name']}**")
@@ -519,7 +486,7 @@ def show_benchmark_analysis(df):
         # Tabela com campanhas destacadas
         st.write(f"**Campanhas Destacadas - {available_metrics[selected_metric]['name']}**")
         
-        # Filtra apenas campanhas significativas (com pelo menos algum gasto ou impressões)
+        # Filtra campanhas significativas
         significant_campaigns = df_comparison[
             (df_comparison['Cost'] > 0) | 
             (df_comparison.get('Impr.', 0) > 0) |
@@ -539,8 +506,7 @@ def show_benchmark_analysis(df):
                 ).style.format({
                     selected_metric: '{:,.2f}',
                     '% vs Média': '{:.1f}%'
-                })
-            )
+                }))
         
         with col2:
             st.write("🔻 Campanhas com Baixa Performance")
@@ -550,97 +516,137 @@ def show_benchmark_analysis(df):
                 ).style.format({
                     selected_metric: '{:,.2f}',
                     '% vs Média': '{:.1f}%'
-                })
-            )
+                }))
+
+def show_campaigns_by_metrics(df):
+    """Mostra campanhas acima/abaixo da média para cada métrica."""
+    st.subheader("🔍 Campanhas por Desempenho Relativo")
     
-    # Análise de variabilidade temporal
-    if 'Date' in df.columns:
-        st.write("### 📈 Análise de Variabilidade Temporal")
+    if df is None or 'Campaign' not in df.columns:
+        st.warning("Dados não disponíveis ou coluna 'Campaign' não encontrada")
+        return
+    
+    # Identifica colunas numéricas (excluindo IDs)
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    non_metric_cols = ['ID', 'Campaign ID', 'Account ID', 'Customer ID']
+    metric_cols = [col for col in numeric_cols if col not in non_metric_cols]
+    
+    if not metric_cols:
+        st.warning("Nenhuma métrica numérica encontrada para análise")
+        return
+    
+    # Seleciona métricas para análise
+    selected_metrics = st.multiselect(
+        "Selecione as métricas para análise",
+        options=metric_cols,
+        default=metric_cols[:3] if len(metric_cols) >= 3 else metric_cols
+    )
+    
+    if not selected_metrics:
+        st.info("Selecione pelo menos uma métrica para análise")
+        return
+    
+    # Calcula médias e identifica campanhas acima/abaixo
+    results = []
+    for metric in selected_metrics:
+        metric_mean = df[metric].mean()
         
-        try:
-            df['Date'] = pd.to_datetime(df['Date'])
-            df['Week'] = df['Date'].dt.isocalendar().week
-            df['Month'] = df['Date'].dt.month
+        # Campanhas acima da média
+        above_avg = df[df[metric] > metric_mean][['Campaign', metric]].sort_values(
+            by=metric, ascending=False)
+        above_avg['Status'] = 'Acima'
+        above_avg['Diferença'] = above_avg[metric] - metric_mean
+        
+        # Campanhas abaixo da média
+        below_avg = df[df[metric] < metric_mean][['Campaign', metric]].sort_values(
+            by=metric, ascending=True)
+        below_avg['Status'] = 'Abaixo'
+        below_avg['Diferença'] = below_avg[metric] - metric_mean
+        
+        # Combina resultados
+        metric_results = pd.concat([above_avg, below_avg])
+        metric_results['Métrica'] = metric
+        metric_results['Média'] = metric_mean
+        
+        results.append(metric_results)
+    
+    # Combina todos os resultados
+    all_results = pd.concat(results)
+    
+    # Opções de visualização
+    view_option = st.radio("Visualização:", 
+                          ["Resumo", "Detalhado", "Gráfico Comparativo"])
+    
+    if view_option == "Resumo":
+        # Mostra resumo por métrica
+        for metric in selected_metrics:
+            st.write(f"### {metric} (Média: {df[metric].mean():.2f})")
             
-            # Seleciona nível de agregação
-            time_agg = st.radio(
-                "Nível de Agregação Temporal",
-                options=['Diário', 'Semanal', 'Mensal'],
-                horizontal=True
-            )
+            col1, col2 = st.columns(2)
             
-            if time_agg == 'Semanal':
-                time_col = 'Week'
-                group_cols = ['Week']
-            elif time_agg == 'Mensal':
-                time_col = 'Month'
-                group_cols = ['Month']
-            else:
-                time_col = 'Date'
-                group_cols = ['Date']
+            with col1:
+                st.write("**Top Campanhas Acima da Média**")
+                top_above = all_results[
+                    (all_results['Métrica'] == metric) & 
+                    (all_results['Status'] == 'Acima')
+                ].head(5)
+                st.dataframe(top_above.style.format({
+                    metric: '{:.2f}',
+                    'Diferença': '{:.2f}',
+                    'Média': '{:.2f}'
+                }))
             
-            # Seleciona métrica para análise temporal
-            temporal_metric = st.selectbox(
-                "Selecione a métrica para análise temporal",
-                options=list(available_metrics.keys()),
-                key='temporal_metric',
-                format_func=lambda x: available_metrics[x]['name']
-            )
-            
-            if temporal_metric:
-                # Calcula métricas agregadas
-                temporal_df = df.groupby(group_cols).agg({
-                    temporal_metric: ['mean', 'std', 'count']
-                }).reset_index()
-                
-                # Renomeia colunas
-                temporal_df.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in temporal_df.columns]
-                
-                # Calcula coeficiente de variação
-                temporal_df['CV'] = (temporal_df[f'{temporal_metric}_std'] / temporal_df[f'{temporal_metric}_mean']) * 100
-                
-                # Mostra métricas de variabilidade
-                st.write("**Variabilidade Temporal**")
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    avg_cv = temporal_df['CV'].mean()
-                    st.metric("Coeficiente de Variação Médio", f"{avg_cv:.1f}%")
-                
-                with col2:
-                    max_cv = temporal_df['CV'].max()
-                    st.metric("Maior Variabilidade", f"{max_cv:.1f}%")
-                
-                with col3:
-                    min_cv = temporal_df['CV'].min()
-                    st.metric("Menor Variabilidade", f"{min_cv:.1f}%")
-                
-                # Gráfico de linha com variabilidade
-                fig = px.line(
-                    temporal_df, 
-                    x=time_col, 
-                    y=f'{temporal_metric}_mean',
-                    error_y=f'{temporal_metric}_std',
-                    title=f"Variação de {available_metrics[temporal_metric]['name']} ({time_agg})"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Mostra períodos com maior variabilidade
-                st.write("**Períodos com Maior Variabilidade**")
-                high_var_periods = temporal_df.nlargest(5, 'CV')
-                st.dataframe(
-                    high_var_periods[[time_col, f'{temporal_metric}_mean', f'{temporal_metric}_std', 'CV']]
-                    .sort_values(time_col)
-                    .style.format({
-                        f'{temporal_metric}_mean': '{:,.2f}',
-                        f'{temporal_metric}_std': '{:,.2f}',
-                        'CV': '{:.1f}%'
-                    })
-                )
-        except Exception as e:
-            st.warning(f"Não foi possível realizar análise temporal: {str(e)}")
+            with col2:
+                st.write("**Principais Campanhas Abaixo da Média**")
+                top_below = all_results[
+                    (all_results['Métrica'] == metric) & 
+                    (all_results['Status'] == 'Abaixo')
+                ].head(5)
+                st.dataframe(top_below.style.format({
+                    metric: '{:.2f}',
+                    'Diferença': '{:.2f}',
+                    'Média': '{:.2f}'
+                }))
+    
+    elif view_option == "Detalhado":
+        # Mostra tabela detalhada
+        st.dataframe(all_results.sort_values(
+            by=['Métrica', 'Status', 'Diferença'], 
+            ascending=[True, False, False]
+        ).style.format({
+            metric: '{:.2f}',
+            'Diferença': '{:.2f}',
+            'Média': '{:.2f}'
+            for metric in selected_metrics
+            if metric in all_results.columns
+        }))
+    
+    elif view_option == "Gráfico Comparativo":
+        # Cria gráfico comparativo
+        fig = px.bar(
+            all_results,
+            x='Campaign',
+            y='Diferença',
+            color='Status',
+            facet_col='Métrica',
+            title='Diferença em relação à média por campanha',
+            labels={'Diferença': 'Diferença da Média'},
+            height=600
+        )
+        fig.update_xaxes(tickangle=45)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Opção para download
+    csv = all_results.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Baixar análise completa",
+        data=csv,
+        file_name="campanhas_por_desempenho.csv",
+        mime="text/csv"
+    )
 
 def show_comparative_analysis():
+    """Mostra análise comparativa entre diferentes conjuntos de dados."""
     st.subheader("📊 Análise Comparativa")
     
     if not st.session_state.comparison_data:
@@ -677,7 +683,7 @@ def show_comparative_analysis():
     st.write("### Métricas Agregadas")
     agg_functions = ['sum', 'mean', 'median', 'max', 'min']
     
-    # Criar dataframe comparativo
+    # Cria dataframe comparativo
     comparison_df = pd.DataFrame({
         dataset1: df1[selected_metric].agg(agg_functions),
         dataset2: df2[selected_metric].agg(agg_functions)
@@ -700,7 +706,6 @@ def show_comparative_analysis():
                      title=f"Comparação de {selected_metric} entre conjuntos de dados")
         st.plotly_chart(fig, use_container_width=True)
     elif chart_type == "Pizza":
-        # Usamos apenas a soma para o gráfico de pizza
         pie_data = pd.DataFrame({
             'Dataset': [dataset1, dataset2],
             'Value': [df1[selected_metric].sum(), df2[selected_metric].sum()]
@@ -712,7 +717,7 @@ def show_comparative_analysis():
     # Comparação por campanha
     st.write("### Comparação por Campanha")
     
-    # Encontrar campanhas em comum
+    # Encontra campanhas em comum
     common_campaigns = list(set(df1['Campaign']) & set(df2['Campaign']))
     
     if not common_campaigns:
@@ -724,7 +729,7 @@ def show_comparative_analysis():
     campaign_data1 = df1[df1['Campaign'] == selected_campaign]
     campaign_data2 = df2[df2['Campaign'] == selected_campaign]
     
-    # Criar dataframe comparativo para a campanha selecionada
+    # Cria dataframe comparativo para a campanha selecionada
     campaign_comparison = pd.DataFrame({
         dataset1: campaign_data1[numeric_columns].mean(),
         dataset2: campaign_data2[numeric_columns].mean()
@@ -735,7 +740,7 @@ def show_comparative_analysis():
     # Gráfico de radar para comparação de métricas
     st.write("### Comparação de Métricas da Campanha")
     
-    # Normalizar os dados para o gráfico de radar
+    # Normaliza os dados para o gráfico de radar
     normalized = campaign_comparison.copy()
     for col in normalized.columns:
         normalized[col] = (normalized[col] - normalized[col].min()) / (normalized[col].max() - normalized[col].min())
@@ -745,176 +750,7 @@ def show_comparative_analysis():
     fig.add_trace(px.line_polar(normalized.reset_index(), r=dataset2, theta='index', 
                                line_close=True).data[0])
     st.plotly_chart(fig, use_container_width=True)
-def show_campaigns_by_metrics(df):
-    st.subheader("🔍 Campanhas por Desempenho Relativo")
-    
-    # Verificar se temos dados e colunas necessárias
-    if df is None or 'Campaign' not in df.columns:
-        st.warning("Dados não disponíveis ou coluna 'Campaign' não encontrada")
-        return
-    
-    # Identificar colunas numéricas (excluindo possíveis códigos numéricos que são IDs)
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    
-    # Remover colunas que não são métricas de performance (como IDs numéricos)
-    non_metric_cols = ['ID', 'Campaign ID', 'Account ID', 'Customer ID']
-    metric_cols = [col for col in numeric_cols if col not in non_metric_cols]
-    
-    if not metric_cols:
-        st.warning("Nenhuma métrica numérica encontrada para análise")
-        return
-    
-    # Selecionar métricas para análise
-    selected_metrics = st.multiselect(
-        "Selecione as métricas para análise",
-        options=metric_cols,
-        default=metric_cols[:3] if len(metric_cols) >= 3 else metric_cols
-    )
-    
-    if not selected_metrics:
-        st.info("Selecione pelo menos uma métrica para análise")
-        return
-    
-    # Calcular médias e identificar campanhas acima/abaixo
-    results = []
-    for metric in selected_metrics:
-        metric_mean = df[metric].mean()
-        
-        # Campanhas acima da média
-        above_avg = df[df[metric] > metric_mean][['Campaign', metric]].sort_values(
-            by=metric, ascending=False)
-        above_avg['Status'] = 'Acima'
-        above_avg['Diferença'] = above_avg[metric] - metric_mean
-        
-        # Campanhas abaixo da média
-        below_avg = df[df[metric] < metric_mean][['Campaign', metric]].sort_values(
-            by=metric, ascending=True)
-        below_avg['Status'] = 'Abaixo'
-        below_avg['Diferença'] = below_avg[metric] - metric_mean
-        
-        # Combinar resultados
-        metric_results = pd.concat([above_avg, below_avg])
-        metric_results['Métrica'] = metric
-        metric_results['Média'] = metric_mean
-        
-        results.append(metric_results)
-    
-    # Combinar todos os resultados
-    all_results = pd.concat(results)
-    
-    # Opções de visualização
-    view_option = st.radio("Visualização:", 
-                          ["Resumo", "Detalhado", "Gráfico Comparativo"])
-    
-    if view_option == "Resumo":
-        # Mostrar resumo por métrica
-        for metric in selected_metrics:
-            st.write(f"### {metric} (Média: {df[metric].mean():.2f})")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**Top Campanhas Acima da Média**")
-                top_above = all_results[
-                    (all_results['Métrica'] == metric) & 
-                    (all_results['Status'] == 'Acima')
-                ].head(5)
-                st.dataframe(top_above.style.format({
-                    metric: '{:.2f}',
-                    'Diferença': '{:.2f}',
-                    'Média': '{:.2f}'
-                }))
-            
-            with col2:
-                st.write("**Principais Campanhas Abaixo da Média**")
-                top_below = all_results[
-                    (all_results['Métrica'] == metric) & 
-                    (all_results['Status'] == 'Abaixo')
-                ].head(5)
-                st.dataframe(top_below.style.format({
-                    metric: '{:.2f}',
-                    'Diferença': '{:.2f}',
-                    'Média': '{:.2f}'
-                }))
-    
-    elif view_option == "Detalhado":
-        # Mostrar tabela detalhada
-        st.dataframe(all_results.sort_values(
-            by=['Métrica', 'Status', 'Diferença'], 
-            ascending=[True, False, False]
-        ).style.format({
-            metric: '{:.2f}',
-            'Diferença': '{:.2f}',
-            'Média': '{:.2f}'
-            for metric in selected_metrics
-            if metric in all_results.columns
-        }))
-    
-    elif view_option == "Gráfico Comparativo":
-        # Criar gráfico comparativo
-        fig = px.bar(
-            all_results,
-            x='Campaign',
-            y='Diferença',
-            color='Status',
-            facet_col='Métrica',
-            title='Diferença em relação à média por campanha',
-            labels={'Diferença': 'Diferença da Média'},
-            height=600
-        )
-        fig.update_xaxes(tickangle=45)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Adicionar opção para download
-    csv = all_results.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Baixar análise completa",
-        data=csv,
-        file_name="campanhas_por_desempenho.csv",
-        mime="text/csv"
-    )
 
-# Atualize a função main para incluir a nova aba
-def main():
-    st.title("📊 Painel de Análise de Google Ads")
-    
-    # Upload de arquivo
-    uploaded_file = st.file_uploader("Carregue seu relatório do Google Ads (CSV ou Excel)", type=["csv", "xlsx", "xls"])
-    
-    # Processa o arquivo carregado
-    if uploaded_file and st.session_state.df_raw is None:
-        with st.spinner("Processando dados do Google Ads..."):
-            st.session_state.df_raw, st.session_state.df_clean = load_google_ads_data(uploaded_file)
-            if st.session_state.df_clean is not None:
-                st.session_state.chat_history.append({
-                    "role": "assistant",
-                    "content": f"✅ Relatório do Google Ads carregado com sucesso! {len(st.session_state.df_clean)} campanhas encontradas."
-                })
-    
-    # Abas principais - ATUALIZADO com nova aba
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Análise de Campanhas", "📊 Benchmark & Variabilidade", "💬 Chatbot Especializado", "Análise Comparativa"])
-    
-    with tab1:
-        if st.session_state.df_clean is not None:
-            show_google_ads_summary(st.session_state.df_clean)
-            show_google_ads_analysis(st.session_state.df_clean)
-            show_campaigns_by_metrics(st.session_state.df_clean)
-        else:
-            st.info("Por favor, carregue um relatório do Google Ads para começar a análise.")
-    
-    with tab2:
-        if st.session_state.df_clean is not None:
-            show_benchmark_analysis(st.session_state.df_clean)
-        else:
-            st.info("Por favor, carregue um relatório do Google Ads para análise de benchmark.")
-    
-    with tab3:
-        chat_interface()
-
-    with tab4:
-        show_comparative_analysis()
-
-# Atualize a função main para incluir a nova aba
 def main():
     st.title("📊 Painel de Análise de Google Ads")
     if st.session_state.df_clean is not None:
