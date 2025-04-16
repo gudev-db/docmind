@@ -717,3 +717,6 @@ def main():
     
     with tab3:
         chat_interface()
+
+if __name__ == "__main__":
+    main()
