@@ -102,15 +102,22 @@ def clean_google_ads_data(df):
     
     return df
 
-def load_google_ads_data(uploaded_file):
+def load_google_ads_data(uploaded_file, file_name=None):
     try:
         # Lê o arquivo ignorando as duas primeiras linhas
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, skiprows=2, encoding='utf-8')
+            df = pd.read_csv(uploaded_file, skiprows=2, encoding='utf-8', dtype={'Campaign': str})  # Forçar Campaign como string
         elif uploaded_file.name.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(uploaded_file, skiprows=2)
+            df = pd.read_excel(uploaded_file, skiprows=2, dtype={'Campaign': str})  # Forçar Campaign como string
         else:
             st.error("Formato de arquivo não suportado. Por favor, carregue um CSV ou Excel.")
+            return None, None
+        
+        # Verifica e converte a coluna Campaign para string, se existir
+        if 'Campaign' in df.columns:
+            df['Campaign'] = df['Campaign'].astype(str)
+        else:
+            st.error("O arquivo não contém a coluna 'Campaign' necessária para análise.")
             return None, None
         
         return df.copy(), clean_google_ads_data(df)
