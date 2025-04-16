@@ -759,134 +759,7 @@ def show_comparative_analysis():
     fig.add_trace(px.line_polar(normalized.reset_index(), r=dataset2, theta='index', 
                                line_close=True).data[0])
     st.plotly_chart(fig, use_container_width=True)
-def show_campaigns_by_metrics(df):
-    st.subheader("🔍 Campanhas por Desempenho Relativo")
-    
-    # Verificar se temos dados e colunas necessárias
-    if df is None or 'Campaign' not in df.columns:
-        st.warning("Dados não disponíveis ou coluna 'Campaign' não encontrada")
-        return
-    
-    # Identificar colunas numéricas (excluindo possíveis códigos numéricos que são IDs)
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    
-    # Remover colunas que não são métricas de performance (como IDs numéricos)
-    non_metric_cols = ['ID', 'Campaign ID', 'Account ID', 'Customer ID']
-    metric_cols = [col for col in numeric_cols if col not in non_metric_cols]
-    
-    if not metric_cols:
-        st.warning("Nenhuma métrica numérica encontrada para análise")
-        return
-    
-    # Selecionar métricas para análise
-    selected_metrics = st.multiselect(
-        "Selecione as métricas para análise",
-        options=metric_cols,
-        default=metric_cols[:3] if len(metric_cols) >= 3 else metric_cols
-    )
-    
-    if not selected_metrics:
-        st.info("Selecione pelo menos uma métrica para análise")
-        return
-    
-    # Calcular médias e identificar campanhas acima/abaixo
-    results = []
-    for metric in selected_metrics:
-        metric_mean = df[metric].mean()
-        
-        # Campanhas acima da média
-        above_avg = df[df[metric] > metric_mean][['Campaign', metric]].sort_values(
-            by=metric, ascending=False)
-        above_avg['Status'] = 'Acima'
-        above_avg['Diferença'] = above_avg[metric] - metric_mean
-        
-        # Campanhas abaixo da média
-        below_avg = df[df[metric] < metric_mean][['Campaign', metric]].sort_values(
-            by=metric, ascending=True)
-        below_avg['Status'] = 'Abaixo'
-        below_avg['Diferença'] = below_avg[metric] - metric_mean
-        
-        # Combinar resultados
-        metric_results = pd.concat([above_avg, below_avg])
-        metric_results['Métrica'] = metric
-        metric_results['Média'] = metric_mean
-        
-        results.append(metric_results)
-    
-    # Combinar todos os resultados
-    all_results = pd.concat(results)
-    
-    # Opções de visualização
-    view_option = st.radio("Visualização:", 
-                          ["Resumo", "Detalhado", "Gráfico Comparativo"])
-    
-    if view_option == "Resumo":
-        # Mostrar resumo por métrica
-        for metric in selected_metrics:
-            st.write(f"### {metric} (Média: {df[metric].mean():.2f})")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**Top Campanhas Acima da Média**")
-                top_above = all_results[
-                    (all_results['Métrica'] == metric) & 
-                    (all_results['Status'] == 'Acima')
-                ].head(5)
-                st.dataframe(top_above.style.format({
-                    metric: '{:.2f}',
-                    'Diferença': '{:.2f}',
-                    'Média': '{:.2f}'
-                }))
-            
-            with col2:
-                st.write("**Principais Campanhas Abaixo da Média**")
-                top_below = all_results[
-                    (all_results['Métrica'] == metric) & 
-                    (all_results['Status'] == 'Abaixo')
-                ].head(5)
-                st.dataframe(top_below.style.format({
-                    metric: '{:.2f}',
-                    'Diferença': '{:.2f}',
-                    'Média': '{:.2f}'
-                }))
-    
-    elif view_option == "Detalhado":
-        # Mostrar tabela detalhada
-        st.dataframe(all_results.sort_values(
-            by=['Métrica', 'Status', 'Diferença'], 
-            ascending=[True, False, False]
-        ).style.format({
-            metric: '{:.2f}',
-            'Diferença': '{:.2f}',
-            'Média': '{:.2f}'
-            for metric in selected_metrics
-            if metric in all_results.columns
-        }))
-    
-    elif view_option == "Gráfico Comparativo":
-        # Criar gráfico comparativo
-        fig = px.bar(
-            all_results,
-            x='Campaign',
-            y='Diferença',
-            color='Status',
-            facet_col='Métrica',
-            title='Diferença em relação à média por campanha',
-            labels={'Diferença': 'Diferença da Média'},
-            height=600
-        )
-        fig.update_xaxes(tickangle=45)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Adicionar opção para download
-    csv = all_results.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Baixar análise completa",
-        data=csv,
-        file_name="campanhas_por_desempenho.csv",
-        mime="text/csv"
-    )
+
 
 # Atualize a função main para incluir a nova aba
 def main():
@@ -912,7 +785,6 @@ def main():
         if st.session_state.df_clean is not None:
             show_google_ads_summary(st.session_state.df_clean)
             show_google_ads_analysis(st.session_state.df_clean)
-            show_campaigns_by_metrics(st.session_state.df_clean)
         else:
             st.info("Por favor, carregue um relatório do Google Ads para começar a análise.")
     
