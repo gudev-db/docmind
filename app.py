@@ -670,7 +670,7 @@ def show_comparative_analysis():
     df2 = st.session_state.comparison_data[dataset2]
     
     # Seleção de métrica para comparação
-    common_columns = list(set(df1.columns) & set(df2.columns)
+    common_columns = list(set(df1.columns) & set(df2.columns))
     numeric_columns = [col for col in common_columns if pd.api.types.is_numeric_dtype(df1[col]) and pd.api.types.is_numeric_dtype(df2[col])]
     
     if not numeric_columns:
