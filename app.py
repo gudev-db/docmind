@@ -753,6 +753,7 @@ def show_comparative_analysis():
     st.plotly_chart(fig, use_container_width=True)
 
 
+
 # Atualize a função main para incluir a nova aba
 def main():
     st.title("📊 Painel de Análise de Google Ads")
@@ -770,63 +771,44 @@ def main():
                     "content": f"✅ Relatório do Google Ads carregado com sucesso! {len(st.session_state.df_clean)} campanhas encontradas."
                 })
     
-    # Abas principais - ATUALIZADO com nova aba
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Análise de Campanhas", "📊 Benchmark & Variabilidade", "💬 Chatbot Especializado", "Análise Comparativa"])
+    # Abas principais
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Análise Individual", "📊 Análise Comparativa", "💬 Chatbot Especializado", "⚙️ Configurações"])
     
     with tab1:
-        if st.session_state.df_clean is not None:
-            show_google_ads_summary(st.session_state.df_clean)
-            show_google_ads_analysis(st.session_state.df_clean)
+        if st.session_state.comparison_data:
+            selected_dataset = st.selectbox("Selecione um conjunto de dados para análise", list(st.session_state.comparison_data.keys()))
+            df_clean = st.session_state.comparison_data[selected_dataset]
+            
+            show_google_ads_summary(df_clean)
+            show_google_ads_analysis(df_clean)
         else:
-            st.info("Por favor, carregue um relatório do Google Ads para começar a análise.")
+            st.info("Por favor, carregue pelo menos um relatório do Google Ads para começar a análise.")
     
     with tab2:
-        if st.session_state.df_clean is not None:
-            show_benchmark_analysis(st.session_state.df_clean)
-        else:
-            st.info("Por favor, carregue um relatório do Google Ads para análise de benchmark.")
-    
-    with tab3:
-        chat_interface()
-
-    with tab4:
         show_comparative_analysis()
-
-# Atualize a função main para incluir a nova aba
-def main():
-    st.title("📊 Painel de Análise de Google Ads")
-    
-    # Upload de arquivo
-    uploaded_file = st.file_uploader("Carregue seu relatório do Google Ads (CSV ou Excel)", type=["csv", "xlsx", "xls"])
-    
-    # Processa o arquivo carregado
-    if uploaded_file and st.session_state.df_raw is None:
-        with st.spinner("Processando dados do Google Ads..."):
-            st.session_state.df_raw, st.session_state.df_clean = load_google_ads_data(uploaded_file)
-            if st.session_state.df_clean is not None:
-                st.session_state.chat_history.append({
-                    "role": "assistant",
-                    "content": f"✅ Relatório do Google Ads carregado com sucesso! {len(st.session_state.df_clean)} campanhas encontradas."
-                })
-    
-    # Abas principais - ATUALIZADO com nova aba
-    tab1, tab2, tab3 = st.tabs(["📈 Análise de Campanhas", "📊 Benchmark & Variabilidade", "💬 Chatbot Especializado"])
-    
-    with tab1:
-        if st.session_state.df_clean is not None:
-            show_google_ads_summary(st.session_state.df_clean)
-            show_google_ads_analysis(st.session_state.df_clean)
-        else:
-            st.info("Por favor, carregue um relatório do Google Ads para começar a análise.")
-    
-    with tab2:
-        if st.session_state.df_clean is not None:
-            show_benchmark_analysis(st.session_state.df_clean)
-        else:
-            st.info("Por favor, carregue um relatório do Google Ads para análise de benchmark.")
     
     with tab3:
+        if st.session_state.comparison_data:
+            selected_dataset = st.selectbox("Selecione um conjunto de dados para o chatbot", list(st.session_state.comparison_data.keys()), key='chatbot_dataset')
+            st.session_state.df_clean = st.session_state.comparison_data[selected_dataset]
         chat_interface()
+    
+    with tab4:
+        st.subheader("Configurações de Colunas")
+        if st.session_state.comparison_data:
+            sample_df = list(st.session_state.comparison_data.values())[0]
+            st.write("Colunas disponíveis no primeiro dataset carregado:")
+            st.write(list(sample_df.columns))
+            
+            st.write("Mapeamento de colunas padrão:")
+            st.json({
+                "Campaign": "Nome da campanha",
+                "Cost": "Custo total",
+                "Clicks": "Cliques",
+                "Impr.": "Impressões",
+                "Impressions": "Impressões (alternativo)",
+                "Conversions": "Conversões"
+            })
 
 if __name__ == "__main__":
     main()
