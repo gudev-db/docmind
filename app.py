@@ -469,7 +469,7 @@ def show_benchmark_analysis(df):
         # Classifica campanhas
         df_comparison['Performance'] = np.where(
             df_comparison[selected_metric] > mean_value * 1.2, 'Acima da Média',
-            np.where(df_comparison[selected_metric] < mean_value * 0.8, 'Abaixo da Média', 'Na Média')
+            np.where(df_comparison[selected_metric] < mean_value * 0.8, 'Abaixo da Média', 'Na Média'))
         
         # Mostra distribuição
         st.write(f"**Distribuição de Performance para {available_metrics[selected_metric]['name']}**")
