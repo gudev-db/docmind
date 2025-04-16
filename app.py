@@ -368,7 +368,7 @@ def generate_google_ads_response(prompt, df):
         context = f"""
         Você é um especialista em Google Ads analisando um relatório de campanhas. 
         Aqui está uma amostra dos dados:
-        {df.head().to_string()}
+        {df.to_string()}
         
         Colunas disponíveis: {', '.join(df.columns)}
         """
