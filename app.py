@@ -646,6 +646,113 @@ def show_benchmark_analysis(df):
         except Exception as e:
             st.warning(f"Não foi possível realizar análise temporal: {str(e)}")
 
+def show_comparative_analysis():
+    st.subheader("📊 Análise Comparativa")
+    
+    if not st.session_state.comparison_data:
+        st.info("Carregue pelo menos dois relatórios para realizar a análise comparativa.")
+        return
+    
+    datasets = list(st.session_state.comparison_data.keys())
+    
+    if len(datasets) < 2:
+        st.warning("Você precisa carregar pelo menos dois conjuntos de dados para comparação.")
+        return
+    
+    # Seleção de datasets para comparação
+    col1, col2 = st.columns(2)
+    with col1:
+        dataset1 = st.selectbox("Selecione o primeiro conjunto de dados", datasets, key="dataset1")
+    with col2:
+        dataset2 = st.selectbox("Selecione o segundo conjunto de dados", [d for d in datasets if d != dataset1], key="dataset2")
+    
+    df1 = st.session_state.comparison_data[dataset1]
+    df2 = st.session_state.comparison_data[dataset2]
+    
+    # Seleção de métrica para comparação
+    common_columns = list(set(df1.columns) & set(df2.columns)
+    numeric_columns = [col for col in common_columns if pd.api.types.is_numeric_dtype(df1[col]) and pd.api.types.is_numeric_dtype(df2[col])]
+    
+    if not numeric_columns:
+        st.warning("Não há colunas numéricas em comum para comparação.")
+        return
+    
+    selected_metric = st.selectbox("Selecione a métrica para comparação", numeric_columns)
+    
+    # Métricas agregadas
+    st.write("### Métricas Agregadas")
+    agg_functions = ['sum', 'mean', 'median', 'max', 'min']
+    
+    # Criar dataframe comparativo
+    comparison_df = pd.DataFrame({
+        dataset1: df1[selected_metric].agg(agg_functions),
+        dataset2: df2[selected_metric].agg(agg_functions)
+    }, index=agg_functions)
+    
+    st.dataframe(comparison_df.style.format("{:,.2f}"))
+    
+    # Gráfico de comparação
+    st.write("### Comparação Visual")
+    
+    # Opções de visualização
+    chart_type = st.radio("Tipo de Gráfico", ["Barras", "Linhas", "Pizza"], horizontal=True)
+    
+    if chart_type == "Barras":
+        fig = px.bar(comparison_df.T, barmode='group', 
+                     title=f"Comparação de {selected_metric} entre conjuntos de dados")
+        st.plotly_chart(fig, use_container_width=True)
+    elif chart_type == "Linhas":
+        fig = px.line(comparison_df.T, 
+                     title=f"Comparação de {selected_metric} entre conjuntos de dados")
+        st.plotly_chart(fig, use_container_width=True)
+    elif chart_type == "Pizza":
+        # Usamos apenas a soma para o gráfico de pizza
+        pie_data = pd.DataFrame({
+            'Dataset': [dataset1, dataset2],
+            'Value': [df1[selected_metric].sum(), df2[selected_metric].sum()]
+        })
+        fig = px.pie(pie_data, values='Value', names='Dataset', 
+                     title=f"Distribuição de {selected_metric} entre conjuntos de dados")
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Comparação por campanha
+    st.write("### Comparação por Campanha")
+    
+    # Encontrar campanhas em comum
+    common_campaigns = list(set(df1['Campaign']) & set(df2['Campaign']))
+    
+    if not common_campaigns:
+        st.warning("Não há campanhas em comum entre os conjuntos de dados selecionados.")
+        return
+    
+    selected_campaign = st.selectbox("Selecione uma campanha para detalhes", common_campaigns)
+    
+    campaign_data1 = df1[df1['Campaign'] == selected_campaign]
+    campaign_data2 = df2[df2['Campaign'] == selected_campaign]
+    
+    # Criar dataframe comparativo para a campanha selecionada
+    campaign_comparison = pd.DataFrame({
+        dataset1: campaign_data1[numeric_columns].mean(),
+        dataset2: campaign_data2[numeric_columns].mean()
+    })
+    
+    st.dataframe(campaign_comparison.style.format("{:,.2f}"))
+    
+    # Gráfico de radar para comparação de métricas
+    st.write("### Comparação de Métricas da Campanha")
+    
+    # Normalizar os dados para o gráfico de radar
+    normalized = campaign_comparison.copy()
+    for col in normalized.columns:
+        normalized[col] = (normalized[col] - normalized[col].min()) / (normalized[col].max() - normalized[col].min())
+    
+    fig = px.line_polar(normalized.reset_index(), r=dataset1, theta='index', 
+                        line_close=True, title=f"Comparação normalizada para {selected_campaign}")
+    fig.add_trace(px.line_polar(normalized.reset_index(), r=dataset2, theta='index', 
+                               line_close=True).data[0])
+    st.plotly_chart(fig, use_container_width=True)
+
+
 # Atualize a função main para incluir a nova aba
 def main():
     st.title("📊 Painel de Análise de Google Ads")
@@ -664,7 +771,7 @@ def main():
                 })
     
     # Abas principais - ATUALIZADO com nova aba
-    tab1, tab2, tab3 = st.tabs(["📈 Análise de Campanhas", "📊 Benchmark & Variabilidade", "💬 Chatbot Especializado"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Análise de Campanhas", "📊 Benchmark & Variabilidade", "💬 Chatbot Especializado", "Análise Comparativa"])
     
     with tab1:
         if st.session_state.df_clean is not None:
@@ -681,6 +788,9 @@ def main():
     
     with tab3:
         chat_interface()
+
+    with tab4:
+        show_comparative_analysis()
 
 # Atualize a função main para incluir a nova aba
 def main():
