@@ -775,14 +775,13 @@ def main():
     tab1, tab2, tab3, tab4 = st.tabs(["📈 Análise Individual", "📊 Análise Comparativa", "💬 Chatbot Especializado", "⚙️ Configurações"])
     
     with tab1:
-        if st.session_state.comparison_data:
-            selected_dataset = st.selectbox("Selecione um conjunto de dados para análise", list(st.session_state.comparison_data.keys()))
-            df_clean = st.session_state.comparison_data[selected_dataset]
+        
+        selected_dataset = st.selectbox("Selecione um conjunto de dados para análise", list(st.session_state.comparison_data.keys()))
+        df_clean = st.session_state.comparison_data[selected_dataset]
             
-            show_google_ads_summary(df_clean)
-            show_google_ads_analysis(df_clean)
-        else:
-            st.info("Por favor, carregue pelo menos um relatório do Google Ads para começar a análise.")
+        show_google_ads_summary(df_clean)
+        show_google_ads_analysis(df_clean)
+        
     
     with tab2:
         show_comparative_analysis()
