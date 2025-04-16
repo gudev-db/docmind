@@ -100,16 +100,6 @@ def clean_google_ads_data(df):
     numeric_columns = df.select_dtypes(include=[np.number]).columns
     df[numeric_columns] = df[numeric_columns].fillna(0)
     
-    # Converte a coluna 'Interaction rate' para float, tratando valores de porcentagem
-    if 'Interaction rate' in df.columns:
-        df['Interaction rate'] = (
-            df['Interaction rate']
-            .astype(str)
-            .str.replace('%', '', regex=False)
-            .str.replace(',', '.', regex=False)  # Se for o caso
-            .astype(float) / 100
-        )
-    
     return df
 
 def load_google_ads_data(uploaded_file):
@@ -197,39 +187,244 @@ def show_google_ads_summary(df):
             else:
                 st.warning("Dados insuficientes para mostrar detalhes da campanha")
             
-            st.write("**Performance por Data**")
-            if 'Date' in df.columns:
-                df_campaign = campaign_data.groupby('Date')[cols_to_show].sum()
-                st.dataframe(df_campaign)
-        
+            st.write("**Métricas Chave**")
+            if has_cost and has_clicks and has_impressions:
+                fig = px.bar(campaign_data, x='Campaign', y=['Cost', 'Clicks', impressions_col if impressions_col else 'Impr.'], barmode='group')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Dados insuficientes para esta visualização")
         else:
-            st.warning("Nenhuma campanha encontrada.")
+            st.warning("Coluna 'Campaign' não encontrada nos dados")
     
     with tab3:
         if 'Date' in df.columns:
-            st.write("**Performance Temporal**")
-            fig = px.line(df, x='Date', y=['Cost', 'Impressions', 'Clicks'], title="Performance Temporal")
-            st.plotly_chart(fig, use_container_width=True)
+            try:
+                df['Date'] = pd.to_datetime(df['Date'])
+                time_data = df.groupby('Date')[['Cost', 'Clicks', impressions_col if impressions_col else 'Impr.']].sum().reset_index()
+                
+                st.write("**Performance ao Longo do Tempo**")
+                fig = px.line(time_data, x='Date', y=['Cost', 'Clicks', impressions_col if impressions_col else 'Impr.'], 
+                             labels={'value': 'Valor', 'variable': 'Métrica'},
+                             title='Métricas ao Longo do Tempo')
+                st.plotly_chart(fig, use_container_width=True)
+            except:
+                st.warning("Não foi possível processar dados temporais")
+        else:
+            st.warning("Dados temporais não disponíveis neste relatório")
 
 def show_google_ads_analysis(df):
-    """
-    Exibe uma análise dos dados de Google Ads com formatação
-    """
-    st.subheader("Análise Completa")
+    st.subheader("Análise Detalhada")
     
-    # Adicionando formatação percentual na coluna de taxas
-    display_df = df.style.format({
-        'Cost': 'R$ {:.2f}',
-        'CTR': '{:.2%}',
-        'Interaction rate': '{:.2%}'  # Aqui garantimos o formato correto
-    })
+    # Filtros
+    st.sidebar.header("Filtros")
+    filter_options = []
     
-    st.dataframe(display_df)
+    if 'Campaign type' in df.columns:
+        campaign_type = st.sidebar.multiselect("Tipo de Campanha", df['Campaign type'].unique())
+        filter_options.append(('Campaign type', campaign_type))
+    
+    if 'Campaign status' in df.columns:
+        status = st.sidebar.multiselect("Status", df['Campaign status'].unique())
+        filter_options.append(('Campaign status', status))
+    
+    # Aplicar filtros
+    filtered_df = df.copy()
+    for col, values in filter_options:
+        if values:
+            filtered_df = filtered_df[filtered_df[col].isin(values)]
+    
+    # Métricas de performance
+    st.write("### Métricas de Performance")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**Eficiência de Custo**")
+        cols_to_show = ['Campaign', 'Cost']
+        if 'Conversions' in filtered_df.columns: cols_to_show.append('Conversions')
+        if 'Conv. value / cost' in filtered_df.columns: cols_to_show.append('Conv. value / cost')
+        
+        if len(cols_to_show) > 1:
+            sort_col = 'Conv. value / cost' if 'Conv. value / cost' in cols_to_show else 'Cost'
+            st.dataframe(filtered_df[cols_to_show]
+                          .sort_values(sort_col, ascending=False)
+                          .style.format({'Cost': 'R$ {:.2f}', 'Conv. value / cost': '{:.2f}'}))
+        else:
+            st.warning("Dados insuficientes para análise de eficiência de custo")
+    
+    with col2:
+        st.write("**Engajamento**")
+        cols_to_show = ['Campaign']
+        if 'Impr.' in filtered_df.columns or 'Impressions' in filtered_df.columns: 
+            col = 'Impr.' if 'Impr.' in filtered_df.columns else 'Impressions'
+            cols_to_show.append(col)
+        if 'Clicks' in filtered_df.columns: cols_to_show.append('Clicks')
+        if 'Interaction rate' in filtered_df.columns: cols_to_show.append('Interaction rate')
+        
+        if len(cols_to_show) > 1:
+            sort_col = 'Interaction rate' if 'Interaction rate' in cols_to_show else 'Impr.' if 'Impr.' in cols_to_show else 'Impressions'
+            st.dataframe(filtered_df[cols_to_show]
+                          .sort_values(sort_col, ascending=False)
+                          .style.format({'Impr.': '{:,.0f}', 'Impressions': '{:,.0f}', 'Interaction rate': '{:.2%}'}))
+        else:
+            st.warning("Dados insuficientes para análise de engajamento")
+    
+    # Visualizações
+    st.write("### Visualizações")
+    available_numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
+    
+    if len(available_numeric_cols) > 0:
+        chart_type = st.selectbox("Tipo de Gráfico", ["Barras", "Dispersão", "Linha"])
+        
+        if chart_type == "Barras":
+            x_axis = st.selectbox("Eixo X", df.columns)
+            y_axis = st.selectbox("Eixo Y", available_numeric_cols)
+            color_options = ['Nenhum'] + [col for col in df.columns if df[col].nunique() < 20]
+            color = st.selectbox("Cor", color_options)
+            
+            if color == 'Nenhum':
+                color = None
+                
+            fig = px.bar(filtered_df, x=x_axis, y=y_axis, color=color)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        elif chart_type == "Dispersão":
+            if len(available_numeric_cols) >= 2:
+                x_axis = st.selectbox("Eixo X", available_numeric_cols)
+                y_axis = st.selectbox("Eixo Y", available_numeric_cols)
+                size = st.selectbox("Tamanho", ['Nenhum'] + available_numeric_cols)
+                color_options = ['Nenhum', 'Campaign type', 'Campaign status'] + [col for col in df.columns if df[col].nunique() < 20]
+                color = st.selectbox("Cor", color_options)
+                
+                if size == 'Nenhum':
+                    size = None
+                if color == 'Nenhum':
+                    color = None
+                    
+                fig = px.scatter(filtered_df, x=x_axis, y=y_axis, size=size, color=color,
+                                hover_name='Campaign' if 'Campaign' in df.columns else None,
+                                hover_data=['Cost', 'Clicks'] if 'Cost' in df.columns and 'Clicks' in df.columns else None)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Número insuficiente de colunas numéricas para gráfico de dispersão")
+        
+        elif chart_type == "Linha":
+            if 'Date' in df.columns:
+                try:
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    metrics = st.multiselect("Métricas", available_numeric_cols,
+                                           default=['Cost', 'Clicks'] if 'Cost' in available_numeric_cols and 'Clicks' in available_numeric_cols else available_numeric_cols[:2])
+                    time_data = filtered_df.groupby('Date')[metrics].sum().reset_index()
+                    fig = px.line(time_data, x='Date', y=metrics)
+                    st.plotly_chart(fig, use_container_width=True)
+                except:
+                    st.warning("Não foi possível processar dados temporais")
+            else:
+                st.warning("Dados temporais não disponíveis para gráfico de linha")
+    else:
+        st.warning("Não há colunas numéricas suficientes para visualizações")
 
-# Carregamento e processamento de arquivo
-uploaded_file = st.file_uploader("Carregue seu arquivo do Google Ads", type=["csv", "xlsx"])
-if uploaded_file:
-    df_raw, df_clean = load_google_ads_data(uploaded_file)
-    if df_clean is not None:
-        show_google_ads_summary(df_clean)
-        show_google_ads_analysis(df_clean)
+def generate_google_ads_response(prompt, df):
+    try:
+        # Prepara o contexto para o Gemini
+        context = f"""
+        Você é um especialista em Google Ads analisando um relatório de campanhas. 
+        Aqui está uma amostra dos dados:
+        {df.head().to_string()}
+        
+        Colunas disponíveis: {', '.join(df.columns)}
+        """
+        
+        # Adiciona métricas principais se disponíveis
+        metrics_info = []
+        if 'Cost' in df.columns:
+            metrics_info.append(f"- Total gasto: R$ {df['Cost'].sum():,.2f}")
+        if 'Impr.' in df.columns or 'Impressions' in df.columns:
+            col = 'Impr.' if 'Impr.' in df.columns else 'Impressions'
+            metrics_info.append(f"- Total de impressões: {df[col].sum():,.0f}")
+        if 'Clicks' in df.columns:
+            metrics_info.append(f"- Total de cliques: {df['Clicks'].sum():,.0f}")
+        if ('Impr.' in df.columns or 'Impressions' in df.columns) and 'Clicks' in df.columns:
+            impressions_col = 'Impr.' if 'Impr.' in df.columns else 'Impressions'
+            total_impressions = df[impressions_col].sum()
+            if total_impressions > 0:
+                ctr = (df['Clicks'].sum() / total_impressions) * 100
+                metrics_info.append(f"- CTR médio: {ctr:.2f}%")
+        
+        if metrics_info:
+            context += "\nMétricas principais:\n" + "\n".join(metrics_info)
+        
+        context += f"""
+        Pergunta: {prompt}
+        
+        Responda de forma técnica, focando em métricas de performance, eficiência de custo e sugestões de otimização.
+        Inclua números específicos quando relevante.
+        """
+        
+        response = model.generate_content(context)
+        return response.text
+    except Exception as e:
+        return f"Erro ao gerar resposta: {str(e)}"
+
+def chat_interface():
+    st.subheader("💬 Chatbot de Análise de Google Ads")
+    
+    # Exibir histórico do chat
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    
+    # Input do usuário
+    if prompt := st.chat_input("Faça sua pergunta sobre os dados do Google Ads..."):
+        # Adicionar mensagem do usuário ao histórico
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        # Gerar resposta
+        with st.spinner("Analisando..."):
+            if st.session_state.df_clean is None:
+                response = "Por favor, carregue um relatório do Google Ads primeiro."
+            else:
+                response = generate_google_ads_response(prompt, st.session_state.df_clean)
+            
+            # Adicionar resposta ao histórico
+            st.session_state.chat_history.append({"role": "assistant", "content": response})
+            
+            with st.chat_message("assistant"):
+                st.markdown(response)
+        
+        st.rerun()
+
+# Interface principal
+def main():
+    st.title("📊 Painel de Análise de Google Ads")
+    
+    # Upload de arquivo
+    uploaded_file = st.file_uploader("Carregue seu relatório do Google Ads (CSV ou Excel)", type=["csv", "xlsx", "xls"])
+    
+    # Processa o arquivo carregado
+    if uploaded_file and st.session_state.df_raw is None:
+        with st.spinner("Processando dados do Google Ads..."):
+            st.session_state.df_raw, st.session_state.df_clean = load_google_ads_data(uploaded_file)
+            if st.session_state.df_clean is not None:
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": f"✅ Relatório do Google Ads carregado com sucesso! {len(st.session_state.df_clean)} campanhas encontradas."
+                })
+    
+    # Abas principais
+    tab1, tab2 = st.tabs(["📈 Análise de Campanhas", "💬 Chatbot Especializado"])
+    
+    with tab1:
+        if st.session_state.df_clean is not None:
+            show_google_ads_summary(st.session_state.df_clean)
+            show_google_ads_analysis(st.session_state.df_clean)
+        else:
+            st.info("Por favor, carregue um relatório do Google Ads para começar a análise.")
+    
+    with tab2:
+        chat_interface()
+
+if __name__ == "__main__":
+    main()
