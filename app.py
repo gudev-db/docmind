@@ -396,7 +396,8 @@ def generate_google_ads_response(prompt, df):
         Pergunta: {prompt}
         
         Responda de forma técnica, focando em métricas de performance, eficiência de custo e sugestões de otimização.
-        Inclua números específicos quando relevante.
+        Inclua números específicos quando relevante. Tire insights sobre as métricas. Retorne os nomes das campanhas que estão abaixo ou acima das médias das colunas numéricas.
+        Me traga insights técnicos sobre a performance das campanhas. Gere um relatório sobre as campanhas.
         """
         
         response = model.generate_content(context)
