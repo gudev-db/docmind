@@ -245,9 +245,12 @@ def show_google_ads_analysis(df):
         
         if len(cols_to_show) > 1:
             sort_col = 'Conv. value / cost' if 'Conv. value / cost' in cols_to_show else 'Cost'
-            st.dataframe(filtered_df[cols_to_show]
-                          .sort_values(sort_col, ascending=False)
-                          .style.format({'Cost': 'R$ {:.2f}', 'Conv. value / cost': '{:.2f}'}))
+            # Modified display approach
+            display_df = filtered_df[cols_to_show].sort_values(sort_col, ascending=False)
+            st.dataframe(display_df.style.format({
+                'Cost': lambda x: f"R$ {x:,.2f}" if pd.notnull(x) else "",
+                'Conv. value / cost': lambda x: f"{x:.2f}" if pd.notnull(x) else ""
+            }))
         else:
             st.warning("Dados insuficientes para análise de eficiência de custo")
     
@@ -262,12 +265,16 @@ def show_google_ads_analysis(df):
         
         if len(cols_to_show) > 1:
             sort_col = 'Interaction rate' if 'Interaction rate' in cols_to_show else 'Impr.' if 'Impr.' in cols_to_show else 'Impressions'
-            st.dataframe(filtered_df[cols_to_show]
-                          .sort_values(sort_col, ascending=False)
-                          .style.format({'Impr.': '{:,.0f}', 'Impressions': '{:,.0f}', 'Interaction rate': '{:.2%}'}))
+            # Modified display approach
+            display_df = filtered_df[cols_to_show].sort_values(sort_col, ascending=False)
+            st.dataframe(display_df.style.format({
+                'Impr.': lambda x: f"{x:,.0f}" if pd.notnull(x) else "",
+                'Impressions': lambda x: f"{x:,.0f}" if pd.notnull(x) else "",
+                'Interaction rate': lambda x: f"{x:.2%}" if pd.notnull(x) else ""
+            }))
         else:
             st.warning("Dados insuficientes para análise de engajamento")
-    
+            
     # Visualizações
     st.write("### Visualizações")
     available_numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
