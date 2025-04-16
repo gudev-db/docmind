@@ -180,7 +180,15 @@ def show_google_ads_summary(df):
             if has_clicks: cols_to_show.append('Clicks')
             if has_impressions: cols_to_show.append(impressions_col if impressions_col else 'Impr.')
             if 'Avg. CPC' in df.columns: cols_to_show.append('Avg. CPC')
-            if 'Interaction rate' in df.columns: cols_to_show.append('Interaction rate')
+            if 'Interaction rate' in display_df.columns:
+                display_df['Interaction rate'] = (
+                    display_df['Interaction rate']
+                    .astype(str)
+                    .str.replace('%', '', regex=False)
+                    .str.replace(',', '.', regex=False)  # Se for o caso
+                    .astype(float) / 100
+                )
+
             
             if cols_to_show:
                 st.dataframe(campaign_data[cols_to_show])
@@ -261,7 +269,15 @@ def show_google_ads_analysis(df):
             col = 'Impr.' if 'Impr.' in filtered_df.columns else 'Impressions'
             cols_to_show.append(col)
         if 'Clicks' in filtered_df.columns: cols_to_show.append('Clicks')
-        if 'Interaction rate' in filtered_df.columns: cols_to_show.append('Interaction rate')
+        if 'Interaction rate' in display_df.columns:
+    display_df['Interaction rate'] = (
+        display_df['Interaction rate']
+        .astype(str)
+        .str.replace('%', '', regex=False)
+        .str.replace(',', '.', regex=False)  # Se for o caso
+        .astype(float) / 100
+    )
+
         
         if len(cols_to_show) > 1:
             sort_col = 'Interaction rate' if 'Interaction rate' in cols_to_show else 'Impr.' if 'Impr.' in cols_to_show else 'Impressions'
