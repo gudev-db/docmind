@@ -617,7 +617,7 @@ def show_campaigns_by_metrics(df):
             metric: '{:.2f}',
             'Diferença': '{:.2f}',
             'Média': '{:.2f}'
-            for metric in selected_metrics
+        for metric in selected_metrics:
             if metric in all_results.columns
         }))
     
