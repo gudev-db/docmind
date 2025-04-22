@@ -63,6 +63,101 @@ def show_google_ads_summary(df):
     with tab3:
         _show_temporal_view(df, impressions_col)
 
+def show_google_ads_analysis(df):
+    st.subheader("Análise Detalhada")
+    
+    # First check if dataframe is valid
+    if df.empty:
+        st.warning("Nenhum dado disponível para análise")
+        return
+
+    # Filtros
+    st.sidebar.header("Filtros")
+    filter_options = []
+    
+    if 'Campaign type' in df.columns:
+        campaign_type = st.sidebar.multiselect("Tipo de Campanha", df['Campaign type'].unique())
+        filter_options.append(('Campaign type', campaign_type))
+    
+    if 'Campaign status' in df.columns:
+        status = st.sidebar.multiselect("Status", df['Campaign status'].unique())
+        filter_options.append(('Campaign status', status))
+    
+    # Aplicar filtros
+    filtered_df = df.copy()
+    for col, values in filter_options:
+        if values:
+            filtered_df = filtered_df[filtered_df[col].isin(values)]
+
+    # Helper function for safe formatting
+    def safe_format(value, fmt):
+        try:
+            if pd.isna(value):
+                return ""
+            if fmt == "currency":
+                return f"R$ {float(value):,.2f}"
+            elif fmt == "percent":
+                return f"{float(value):.2%}"
+            elif fmt == "int":
+                return f"{int(value):,}"
+            else:
+                return str(value)
+        except:
+            return str(value)
+    
+    # Métricas de performance
+    st.write("### Métricas de Performance")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**Eficiência de Custo**")
+        cols_to_show = ['Campaign', 'Cost']
+        if 'Conversions' in filtered_df.columns: cols_to_show.append('Conversions')
+        if 'Conv. value / cost' in filtered_df.columns: cols_to_show.append('Conv. value / cost')
+        
+        if len(cols_to_show) > 1:
+            sort_col = 'Conv. value / cost' if 'Conv. value / cost' in cols_to_show else 'Cost'
+            display_df = filtered_df[cols_to_show].sort_values(sort_col, ascending=False)
+            
+            # Apply formatting without using styler
+            formatted_df = display_df.copy()
+            if 'Cost' in formatted_df.columns:
+                formatted_df['Cost'] = formatted_df['Cost'].apply(lambda x: safe_format(x, "currency"))
+            if 'Conv. value / cost' in formatted_df.columns:
+                formatted_df['Conv. value / cost'] = formatted_df['Conv. value / cost'].apply(lambda x: safe_format(x, "float"))
+            
+            st.dataframe(formatted_df)
+        else:
+            st.warning("Dados insuficientes para análise de eficiência de custo")
+    
+    with col2:
+        st.write("**Engajamento**")
+        cols_to_show = ['Campaign']
+        if 'Impr.' in filtered_df.columns or 'Impressions' in filtered_df.columns: 
+            col = 'Impr.' if 'Impr.' in filtered_df.columns else 'Impressions'
+            cols_to_show.append(col)
+        if 'Clicks' in filtered_df.columns: cols_to_show.append('Clicks')
+        if 'Interaction rate' in filtered_df.columns: cols_to_show.append('Interaction rate')
+        
+        if len(cols_to_show) > 1:
+            sort_col = 'Interaction rate' if 'Interaction rate' in cols_to_show else 'Impr.' if 'Impr.' in cols_to_show else 'Impressions'
+            display_df = filtered_df[cols_to_show].sort_values(sort_col, ascending=False)
+            
+            # Apply formatting without using styler
+            formatted_df = display_df.copy()
+            if 'Impr.' in formatted_df.columns:
+                formatted_df['Impr.'] = formatted_df['Impr.'].apply(lambda x: safe_format(x, "int"))
+            if 'Impressions' in formatted_df.columns:
+                formatted_df['Impressions'] = formatted_df['Impressions'].apply(lambda x: safe_format(x, "int"))
+            if 'Interaction rate' in formatted_df.columns:
+                formatted_df['Interaction rate'] = formatted_df['Interaction rate'].apply(
+                    lambda x: safe_format(x, "percent") if isinstance(x, (int, float)) else str(x)
+                )
+            
+            st.dataframe(formatted_df)
+        else:
+            st.warning("Dados insuficientes para análise de engajamento")
+
 def _show_general_view(df, has_cost, impressions_col):
     """Mostra visualização geral"""
     st.write("**Top Campanhas por Gasto**")
