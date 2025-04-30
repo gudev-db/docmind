@@ -89,18 +89,33 @@ def clean_google_ads_data(df):
     return df
 
 def load_google_ads_data(uploaded_file):
-    """Carrega dados do Google Ads a partir de um arquivo"""
+    """Carrega dados do Google Ads garantindo que 'Campaign' seja uma coluna string"""
     try:
+        # Carrega mantendo 'Campaign' como coluna regular
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, skiprows=2, encoding='utf-8', dtype={'Campaign': str})
+            df = pd.read_csv(uploaded_file, 
+                           skiprows=2, 
+                           encoding='utf-8', 
+                           dtype={'Campaign': str},  # Força como string
+                           index_col=False)  # Evita que qualquer coluna vire índice
         elif uploaded_file.name.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(uploaded_file, skiprows=2, dtype={'Campaign': str})
+            df = pd.read_excel(uploaded_file, 
+                              skiprows=2, 
+                              dtype={'Campaign': str},
+                              index_col=False)
         else:
             raise ValueError("Formato de arquivo não suportado")
+        
+        # Verifica se 'Campaign' existe e corrige se estiver como índice
+        if 'Campaign' not in df.columns and df.index.name == 'Campaign':
+            df = df.reset_index()  # Converte o índice em coluna
         
         if 'Campaign' not in df.columns:
             raise ValueError("O arquivo não contém a coluna 'Campaign' necessária")
         
-        return df.copy(), clean_google_ads_data(df)
+        # Garante que a coluna Campaign seja string
+        df['Campaign'] = df['Campaign'].astype(str)
+        
+        return df.copy(), clean_google_ads_data(df.copy())
     except Exception as e:
         raise ValueError(f"Erro ao carregar os dados do Google Ads: {str(e)}")
