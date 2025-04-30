@@ -24,23 +24,38 @@ def preprocess_google_ads_numbers(value):
     return value
 
 def clean_google_ads_data(df):
-    """Limpa o dataframe do Google Ads, mantendo colunas de texto (como 'Campaign') inalteradas."""
+    """Limpa o dataframe do Google Ads mantendo a coluna Campaign intacta"""
+    # Lista de colunas que devem SEMPRE ser mantidas como estão
+    protected_cols = ['Campaign', 'Ad group', 'Keyword', 'Ad']
     
-    # Identifica colunas que podem ser numéricas (baseado no conteúdo, não no dtype inicial)
-    numeric_cols = []
-    for col in df.columns:
-        # Se a coluna contém números com formatação (vírgulas, pontos, %, R$, etc.)
-        if df[col].astype(str).str.contains(r'[\d\.,%\$€£-]', regex=True).any():
-            numeric_cols.append(col)
+    # Colunas que sabemos serem numéricas (adicionar outras conforme necessário)
+    known_numeric_cols = [
+        'Clicks', 'Impr.', 'Interactions', 'Viewable impr.', 
+        'Conversions', 'Impressions', 'Cost', 'CPM', 'CPC',
+        'CTR', 'Conversion rate', 'Cost per conversion'
+    ]
     
-    # Remove colunas que definitivamente NÃO devem ser tratadas como numéricas (como 'Campaign')
-    excluded_cols = ['Campaign', 'Ad group', 'Keyword', 'Ad']  # Adicione outras se necessário
-    numeric_cols = [col for col in numeric_cols if col not in excluded_cols]
+    # Colunas monetárias (baseado no nome)
+    money_cols = [col for col in df.columns 
+                 if any(word in col.lower() for word in ['cost', 'cpm', 'cpc', 'cpv', 'budget', 'value', 'rate', 'amount'])]
+    
+    # Combina todas as colunas numéricas a serem processadas
+    numeric_cols_to_process = list(set(known_numeric_cols + money_cols))
+    
+    # Remove as colunas protegidas
+    numeric_cols_to_process = [col for col in numeric_cols_to_process 
+                             if col in df.columns and col not in protected_cols]
     
     # Processa apenas as colunas numéricas identificadas
-    for col in numeric_cols:
-        df[col] = df[col].astype(str).apply(preprocess_google_ads_numbers)
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    for col in numeric_cols_to_process:
+        if col in df.columns:
+            # Converte para string, processa e tenta converter para numérico
+            df[col] = df[col].astype(str).apply(preprocess_google_ads_numbers)
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
+    # Preenche valores numéricos faltantes (apenas para colunas já numéricas)
+    numeric_columns = df.select_dtypes(include=[np.number]).columns
+    df[numeric_columns] = df[numeric_columns].fillna(0)
     
     return df
 
