@@ -23,13 +23,26 @@ def preprocess_google_ads_numbers(value):
     
     return value
 
-def clean_google_ads_value(value):
-    """Limpa e converte um valor do Google Ads para float"""
-    preprocessed = preprocess_google_ads_numbers(value)
-    try:
-        return float(preprocessed)
-    except ValueError:
-        return 0.0
+def clean_google_ads_data(df):
+    """Limpa o dataframe do Google Ads, mantendo colunas de texto (como 'Campaign') inalteradas."""
+    
+    # Identifica colunas que podem ser numéricas (baseado no conteúdo, não no dtype inicial)
+    numeric_cols = []
+    for col in df.columns:
+        # Se a coluna contém números com formatação (vírgulas, pontos, %, R$, etc.)
+        if df[col].astype(str).str.contains(r'[\d\.,%\$€£-]', regex=True).any():
+            numeric_cols.append(col)
+    
+    # Remove colunas que definitivamente NÃO devem ser tratadas como numéricas (como 'Campaign')
+    excluded_cols = ['Campaign', 'Ad group', 'Keyword', 'Ad']  # Adicione outras se necessário
+    numeric_cols = [col for col in numeric_cols if col not in excluded_cols]
+    
+    # Processa apenas as colunas numéricas identificadas
+    for col in numeric_cols:
+        df[col] = df[col].astype(str).apply(preprocess_google_ads_numbers)
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
+    return df
 
 def clean_google_ads_data(df):
     """Limpa o dataframe do Google Ads"""
